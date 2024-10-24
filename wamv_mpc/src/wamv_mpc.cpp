@@ -46,9 +46,13 @@ void WAMV_MPC::states_cb(const gazebo_msgs::ModelStates::ConstPtr& msg)
     angular_vel_inertial.r = msg->twist[17].angular.z;
 
     // get angle phi, theta, psi
-    tf::quaternionMsgToTF(msg->pose[17].orientation,tf_quaternion);
+    tf::quaternionMsgToTF(msg->pose[17].orientation, tf_quaternion);
+    // Normalize the quaternion
+    if (tf_quaternion.length() != 0) {
+        tf_quaternion.normalize();
+    }
+    // extract roll, pitch, and yaw
     tf::Matrix3x3(tf_quaternion).getRPY(local_euler.phi, local_euler.theta, local_euler.psi);
-
     
 }
 
