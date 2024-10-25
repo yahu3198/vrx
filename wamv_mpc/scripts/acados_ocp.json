@@ -856,20 +856,20 @@
         "nz": 0
     },
     "external_function_files_model": [
-        "bluerov2_model/bluerov2_expl_ode_fun.c",
-        "bluerov2_model/bluerov2_expl_vde_forw.c",
-        "bluerov2_model/bluerov2_expl_vde_adj.c"
+        "wamv_model/wamv_expl_ode_fun.c",
+        "wamv_model/wamv_expl_vde_forw.c",
+        "wamv_model/wamv_expl_vde_adj.c"
     ],
     "external_function_files_ocp": [
-        "bluerov2_cost/bluerov2_cost_y_0_fun.c",
-        "bluerov2_cost/bluerov2_cost_y_0_fun_jac_ut_xt.c",
-        "bluerov2_cost/bluerov2_cost_y_0_hess.c",
-        "bluerov2_cost/bluerov2_cost_y_fun.c",
-        "bluerov2_cost/bluerov2_cost_y_fun_jac_ut_xt.c",
-        "bluerov2_cost/bluerov2_cost_y_hess.c",
-        "bluerov2_cost/bluerov2_cost_y_e_fun.c",
-        "bluerov2_cost/bluerov2_cost_y_e_fun_jac_ut_xt.c",
-        "bluerov2_cost/bluerov2_cost_y_e_hess.c"
+        "wamv_cost/wamv_cost_y_0_fun.c",
+        "wamv_cost/wamv_cost_y_0_fun_jac_ut_xt.c",
+        "wamv_cost/wamv_cost_y_0_hess.c",
+        "wamv_cost/wamv_cost_y_fun.c",
+        "wamv_cost/wamv_cost_y_fun_jac_ut_xt.c",
+        "wamv_cost/wamv_cost_y_hess.c",
+        "wamv_cost/wamv_cost_y_e_fun.c",
+        "wamv_cost/wamv_cost_y_e_fun_jac_ut_xt.c",
+        "wamv_cost/wamv_cost_y_e_hess.c"
     ],
     "json_file": "acados_ocp.json",
     "model": {
@@ -916,7 +916,7 @@
         "f_impl_expr": "jhpnnagiieahaaaadaaaaaaaaaaaaaaaaaegkaaaaaaaaaaaaaaagaaaaaaaaaaaaaaabaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaagaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabaaaaaaaaaaaaaaacaaaaaaaaaaaaaaadaaaaaaaaaaaaaaaeaaaaaaaaaaaaaaafaaaaaaaaaaaaaaagaaaaaaaaaaaaaaaegcaaaaaaaaaaaaaaaegpcaaaaaaaaaaaaaafaaaaaaaihpfegpgehegcaaaaaaaaaaaaaaaegdaaaaaaaaaaaaaaaegoaaaaaaaaaaaaaaaegpcaaaaaaaaaaaaaadaaaaaaaahdhjgegpcaaaaaaaaaaaaaabaaaaaaafhegdaaaaaaaaaaaaaaaegnaaaaaaaaaaaaaaachcaaaaaaaaaaaaaaaegpcaaaaaaaaaaaaaabaaaaaaaghegcaaaaaaaaaaaaaaaegpcaaaaaaaaaaaaaafaaaaaaajhpfegpgehegbaaaaaaaaaaaaaaaegdaaaaaaaaaaaaaaaegnaaaaaaaaaaaaaaachcaaaaaaaaaaaaaaacheaaaaaaaaaaaaaaaegdaaaaaaaaaaaaaaaegoaaaaaaaaaaaaaaachcaaaaaaaaaaaaaaachhaaaaaaaaaaaaaaaegcaaaaaaaaaaaaaaaegpcaaaaaaaaaaaaaahaaaaaaaahdhjgpfegpgehegpcaaaaaaaaaaaaaabaaaaaaachegcaaaaaaaaaaaaaaaegpcaaaaaaaaaaaaaafaaaaaaafhpfegpgehegdaaaaaaaaaaaaaaaegmcaaaaaaaaaaaaaachjhfdcgggobpfahpdegbaaaaaaaaaaaaaaaegbaaaaaaaaaaaaaaaegbaaaaaaaaaaaaaaaegdaaaaaaaaaaaaaaaegpcaaaaaaaaaaaaaacaaaaaaaefahegoaaaaaaaaaaaaaaaegpcaaaaaaaaaaaaaahaaaaaaaegfgmgehbgpfahegdaaaaaaaaaaaaaaaegpcaaaaaaaaaaaaaacaaaaaaaefdhegoaaaaaaaaaaaaaaaegpcaaaaaaaaaaaaaahaaaaaaaegfgmgehbgpfdhegdaaaaaaaaaaaaaaaegdaaaaaaaaaaaaaaaegmcaaaaaaaaaaaaaachokhebokhebgepgaechhaaaaaaaaaaaaaaachdbaaaaaaaaaaaaaaegdaaaaaaaaaaaaaaaegdaaaaaaaaaaaaaaaegmcaaaaaaaaaaaaaacholdnmghdecccmoplchdbaaaaaaaaaaaaaachdbaaaaaaaaaaaaaaegcaaaaaaaaaaaaaaaegpcaaaaaaaaaaaaaafaaaaaaaghpfegpgehegdaaaaaaaaaaaaaaachgbaaaaaaaaaaaaaaegbaaaaaaaaaaaaaaaegcaaaaaaaaaaaaaaaegbaaaaaaaaaaaaaaaegdaaaaaaaaaaaaaaachhbaaaaaaaaaaaaaaegnaaaaaaaaaaaaaaachibaaaaaaaaaaaaaaegdaaaaaaaaaaaaaaachlbaaaaaaaaaaaaaaegnaaaaaaaaaaaaaaachmbaaaaaaaaaaaaaaegdaaaaaaaaaaaaaaaegdaaaaaaaaaaaaaaachacaaaaaaaaaaaaaacheaaaaaaaaaaaaaaachdbaaaaaaaaaaaaaaegdaaaaaaaaaaaaaaaegdaaaaaaaaaaaaaaaegmcaaaaaaaaaaaaaachfnepedlljehoomplchdbaaaaaaaaaaaaaachdbaaaaaaaaaaaaaaegcaaaaaaaaaaaaaaaegpcaaaaaaaaaaaaaafaaaaaaachpfegpgehegdaaaaaaaaaaaaaaachgbaaaaaaaaaaaaaaegcaaaaaaaaaaaaaaaegcaaaaaaaaaaaaaaaegbaaaaaaaaaaaaaaaegcaaaaaaaaaaaaaaaegcaaaaaaaaaaaaaaaegdaaaaaaaaaaaaaaaegdaaaaaaaaaaaaaaaegmcaaaaaaaaaaaaaachnmmmmmmmmmmmepplchhbaaaaaaaaaaaaaaegoaaaaaaaaaaaaaaachibaaaaaaaaaaaaaaegdaaaaaaaaaaaaaaaegdaaaaaaaaaaaaaaaegmcaaaaaaaaaaaaaachiebokhebokhenopdchhbaaaaaaaaaaaaaaegnaaaaaaaaaaaaaaachibaaaaaaaaaaaaaaegdaaaaaaaaaaaaaaaegdaaaaaaaaaaaaaaaegmcaaaaaaaaaaaaaachnmmmmmmmmmmmeppdchlbaaaaaaaaaaaaaaegoaaaaaaaaaaaaaaachmbaaaaaaaaaaaaaaegdaaaaaaaaaaaaaaaegdaaaaaaaaaaaaaaachodaaaaaaaaaaaaaachlbaaaaaaaaaaaaaaegnaaaaaaaaaaaaaaachmbaaaaaaaaaaaaaaegdaaaaaaaaaaaaaaaegdaaaaaaaaaaaaaaachecaaaaaaaaaaaaaachdbaaaaaaaaaaaaaacheaaaaaaaaaaaaaaaegdaaaaaaaaaaaaaaaegdaaaaaaaaaaaaaaachddaaaaaaaaaaaaaachdbaaaaaaaaaaaaaachhaaaaaaaaaaaaaaa",
         "gnsf_nontrivial_f_LO": 1,
         "gnsf_purely_linear": 0,
-        "name": "bluerov2",
+        "name": "wamv",
         "nu_original": null,
         "p": "jhpnnagiieahaaaadaaaaaaaaaaaaaaaaaegdaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "p_global": null,
@@ -930,7 +930,7 @@
         "xdot": "jhpnnagiieahaaaadaaaaaaaaaaaaaaaaaegkaaaaaaaaaaaaaaagaaaaaaaaaaaaaaabaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaagaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabaaaaaaaaaaaaaaacaaaaaaaaaaaaaaadaaaaaaaaaaaaaaaeaaaaaaaaaaaaaaafaaaaaaaaaaaaaaagaaaaaaaaaaaaaaaegpcaaaaaaaaaaaaaafaaaaaaaihpfegpgehegpcaaaaaaaaaaaaaafaaaaaaajhpfegpgehegpcaaaaaaaaaaaaaahaaaaaaaahdhjgpfegpgehegpcaaaaaaaaaaaaaafaaaaaaafhpfegpgehegpcaaaaaaaaaaaaaafaaaaaaaghpfegpgehegpcaaaaaaaaaaaaaafaaaaaaachpfegpgeh",
         "z": "jhpnnagiieahaaaadaaaaaaaaaaaaaaaaaegdaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     },
-    "name": "bluerov2",
+    "name": "wamv",
     "p_global_values": [],
     "parameter_values": [],
     "problem_class": "OCP",

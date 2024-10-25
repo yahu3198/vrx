@@ -2,6 +2,39 @@
 
 WAMV_MPC::WAMV_MPC(ros::NodeHandle& nh)
 {
+    // read parameter
+    nh.getParam("/bluerov2_dob_node/read_wrench",READ_WRENCH);
+    nh.getParam("/bluerov2_dob_node/compensate_d",COMPENSATE_D);
+    nh.getParam("/bluerov2_dob_node/ref_traj", REF_TRAJ);
+    // nh.getParam("/bluerov2_dob_node/applied_forcex", WRENCH_FX);
+    // nh.getParam("/bluerov2_dob_node/applied_forcey", WRENCH_FY);
+    // nh.getParam("/bluerov2_dob_node/applied_forcez", WRENCH_FZ);
+    // nh.getParam("/bluerov2_dob_node/applied_torquez", WRENCH_TZ);
+    // nh.getParam("/bluerov2_dob_node/disturbance_x", solver_param.disturbance_x);
+    // nh.getParam("/bluerov2_dob_node/disturbance_y", solver_param.disturbance_y);
+    // nh.getParam("/bluerov2_dob_node/disturbance_z", solver_param.disturbance_z);
+    // nh.getParam("/bluerov2_dob_node/disturbance_phi", solver_param.disturbance_phi);
+    // nh.getParam("/bluerov2_dob_node/disturbance_theta", solver_param.disturbance_theta);
+    // nh.getParam("/bluerov2_dob_node/disturbance_psi", solver_param.disturbance_psi);
+    
+    // Pre-load the trajectory
+    const char * c = REF_TRAJ.c_str();
+	number_of_steps = readDataFromFile(c, trajectory);
+	if (number_of_steps == 0){
+		ROS_WARN("Cannot load CasADi optimal trajectory!");
+	}
+	else{
+		ROS_INFO_STREAM("Number of steps of selected trajectory: " << number_of_steps << std::endl);
+	}
+
+    // Initialize MPC
+    int create_status = 1;
+    create_status = wamv_acados_create(mpc_capsule);
+    if (create_status != 0){
+        ROS_INFO_STREAM("acados_create() returned status " << create_status << ". Exiting." << std::endl);
+        exit(1);
+    }
+
     // ros subsriber & publisher
     states_sub = nh.subscribe<gazebo_msgs::ModelStates>("/gazebo/model_states", 20, &WAMV_MPC::states_cb, this);
 

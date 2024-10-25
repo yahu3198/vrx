@@ -35,38 +35,38 @@
 # model
 MODEL_SRC=
 
-MODEL_SRC+= bluerov2_model/bluerov2_expl_ode_fun.c
-MODEL_SRC+= bluerov2_model/bluerov2_expl_vde_forw.c
-MODEL_SRC+= bluerov2_model/bluerov2_expl_vde_adj.c
+MODEL_SRC+= wamv_model/wamv_expl_ode_fun.c
+MODEL_SRC+= wamv_model/wamv_expl_vde_forw.c
+MODEL_SRC+= wamv_model/wamv_expl_vde_adj.c
 
 MODEL_OBJ := $(MODEL_SRC:.c=.o)
 # optimal control problem - mostly CasADi exports
 OCP_SRC=
 
 
-OCP_SRC+= bluerov2_cost/bluerov2_cost_y_0_fun.c
-OCP_SRC+= bluerov2_cost/bluerov2_cost_y_0_fun_jac_ut_xt.c
-OCP_SRC+= bluerov2_cost/bluerov2_cost_y_0_hess.c
-OCP_SRC+= bluerov2_cost/bluerov2_cost_y_fun.c
-OCP_SRC+= bluerov2_cost/bluerov2_cost_y_fun_jac_ut_xt.c
-OCP_SRC+= bluerov2_cost/bluerov2_cost_y_hess.c
-OCP_SRC+= bluerov2_cost/bluerov2_cost_y_e_fun.c
-OCP_SRC+= bluerov2_cost/bluerov2_cost_y_e_fun_jac_ut_xt.c
-OCP_SRC+= bluerov2_cost/bluerov2_cost_y_e_hess.c
+OCP_SRC+= wamv_cost/wamv_cost_y_0_fun.c
+OCP_SRC+= wamv_cost/wamv_cost_y_0_fun_jac_ut_xt.c
+OCP_SRC+= wamv_cost/wamv_cost_y_0_hess.c
+OCP_SRC+= wamv_cost/wamv_cost_y_fun.c
+OCP_SRC+= wamv_cost/wamv_cost_y_fun_jac_ut_xt.c
+OCP_SRC+= wamv_cost/wamv_cost_y_hess.c
+OCP_SRC+= wamv_cost/wamv_cost_y_e_fun.c
+OCP_SRC+= wamv_cost/wamv_cost_y_e_fun_jac_ut_xt.c
+OCP_SRC+= wamv_cost/wamv_cost_y_e_hess.c
 
-OCP_SRC+= acados_solver_bluerov2.c
+OCP_SRC+= acados_solver_wamv.c
 
 OCP_OBJ := $(OCP_SRC:.c=.o)
 # for sim solver
-SIM_SRC= acados_sim_solver_bluerov2.c
+SIM_SRC= acados_sim_solver_wamv.c
 SIM_OBJ := $(SIM_SRC:.c=.o)
 
 # for target example_sim
-EX_SIM_SRC= main_sim_bluerov2.c
+EX_SIM_SRC= main_sim_wamv.c
 EX_SIM_OBJ := $(EX_SIM_SRC:.c=.o)
 EX_SIM_EXE := $(EX_SIM_SRC:.c=)
 # for target example
-EX_SRC= main_bluerov2.c
+EX_SRC= main_wamv.c
 EX_OBJ := $(EX_SRC:.c=.o)
 EX_EXE := $(EX_SRC:.c=)
 
@@ -108,8 +108,8 @@ LDLIBS+= -lm
 LDLIBS+= 
 
 # libraries
-LIBACADOS_SOLVER=libacados_solver_bluerov2.so
-LIBACADOS_OCP_SOLVER=libacados_ocp_solver_bluerov2.so
+LIBACADOS_SOLVER=libacados_solver_wamv.so
+LIBACADOS_OCP_SOLVER=libacados_ocp_solver_wamv.so
 LIBACADOS_SIM_SOLVER=lib$(SIM_SRC:.c=.so)
 
 # virtual targets
@@ -159,7 +159,7 @@ ocp_cython: ocp_cython_o
 	-o acados_ocp_solver_pyx.so \
 	-Wl,-rpath=$(LIB_PATH) \
 	acados_ocp_solver_pyx.o \
-	$(abspath .)/libacados_ocp_solver_bluerov2.so \
+	$(abspath .)/libacados_ocp_solver_wamv.so \
 	$(LDFLAGS) $(LDLIBS)
 
 
@@ -187,7 +187,7 @@ sim_cython: sim_cython_o
 	-o acados_sim_solver_pyx.so \
 	-Wl,-rpath=$(LIB_PATH) \
 	acados_sim_solver_pyx.o \
-	$(abspath .)/libacados_sim_solver_bluerov2.so \
+	$(abspath .)/libacados_sim_solver_wamv.so \
 	$(LDFLAGS) $(LDLIBS)
 
 clean:
@@ -199,13 +199,13 @@ clean_ocp_shared_lib:
 	$(RM) $(OCP_OBJ)
 
 clean_ocp_cython:
-	$(RM) libacados_ocp_solver_bluerov2.so
-	$(RM) acados_solver_bluerov2.o
+	$(RM) libacados_ocp_solver_wamv.so
+	$(RM) acados_solver_wamv.o
 	$(RM) acados_ocp_solver_pyx.so
 	$(RM) acados_ocp_solver_pyx.o
 
 clean_sim_cython:
-	$(RM) libacados_sim_solver_bluerov2.so
-	$(RM) acados_sim_solver_bluerov2.o
+	$(RM) libacados_sim_solver_wamv.so
+	$(RM) acados_sim_solver_wamv.o
 	$(RM) acados_sim_solver_pyx.so
 	$(RM) acados_sim_solver_pyx.o

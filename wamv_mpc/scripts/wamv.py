@@ -6,7 +6,7 @@ import math
 
 def export_wamv_model() -> AcadosModel:
 
-    model_name = 'bluerov2'
+    model_name = 'wamv'
 
     # states
     x = SX.sym('x')                 # inertial position x
