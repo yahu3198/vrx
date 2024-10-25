@@ -3,19 +3,19 @@
 WAMV_MPC::WAMV_MPC(ros::NodeHandle& nh)
 {
     // read parameter
-    nh.getParam("/bluerov2_dob_node/read_wrench",READ_WRENCH);
-    nh.getParam("/bluerov2_dob_node/compensate_d",COMPENSATE_D);
-    nh.getParam("/bluerov2_dob_node/ref_traj", REF_TRAJ);
-    // nh.getParam("/bluerov2_dob_node/applied_forcex", WRENCH_FX);
-    // nh.getParam("/bluerov2_dob_node/applied_forcey", WRENCH_FY);
-    // nh.getParam("/bluerov2_dob_node/applied_forcez", WRENCH_FZ);
-    // nh.getParam("/bluerov2_dob_node/applied_torquez", WRENCH_TZ);
-    // nh.getParam("/bluerov2_dob_node/disturbance_x", solver_param.disturbance_x);
-    // nh.getParam("/bluerov2_dob_node/disturbance_y", solver_param.disturbance_y);
-    // nh.getParam("/bluerov2_dob_node/disturbance_z", solver_param.disturbance_z);
-    // nh.getParam("/bluerov2_dob_node/disturbance_phi", solver_param.disturbance_phi);
-    // nh.getParam("/bluerov2_dob_node/disturbance_theta", solver_param.disturbance_theta);
-    // nh.getParam("/bluerov2_dob_node/disturbance_psi", solver_param.disturbance_psi);
+    nh.getParam("/wamv_mpc_node/read_wrench",READ_WRENCH);
+    nh.getParam("/wamv_mpc_node/compensate_d",COMPENSATE_D);
+    nh.getParam("/wamv_mpc_node/ref_traj", REF_TRAJ);
+    // nh.getParam("/wamv_mpc_node/applied_forcex", WRENCH_FX);
+    // nh.getParam("/wamv_mpc_node/applied_forcey", WRENCH_FY);
+    // nh.getParam("/wamv_mpc_node/applied_forcez", WRENCH_FZ);
+    // nh.getParam("/wamv_mpc_node/applied_torquez", WRENCH_TZ);
+    // nh.getParam("/wamv_mpc_node/disturbance_x", solver_param.disturbance_x);
+    // nh.getParam("/wamv_mpc_dob_node/disturbance_y", solver_param.disturbance_y);
+    // nh.getParam("/wamv_mpc_node/disturbance_z", solver_param.disturbance_z);
+    // nh.getParam("/wamv_mpc_node/disturbance_phi", solver_param.disturbance_phi);
+    // nh.getParam("/wamv_mpc_node/disturbance_theta", solver_param.disturbance_theta);
+    // nh.getParam("/wamv_mpc_node/disturbance_psi", solver_param.disturbance_psi);
     
     // Pre-load the trajectory
     const char * c = REF_TRAJ.c_str();
@@ -37,8 +37,15 @@ WAMV_MPC::WAMV_MPC(ros::NodeHandle& nh)
 
     // ros subsriber & publisher
     states_sub = nh.subscribe<gazebo_msgs::ModelStates>("/gazebo/model_states", 20, &WAMV_MPC::states_cb, this);
-
+    left_thrust_angle_pub = nh.advertise<std_msgs::Float32>("/wamv/thrusters/left_thrust_angle", 20);
+    left_thrust_cmd_pub = nh.advertise<std_msgs::Float32>("/wamv/thrusters/left_thrust_cmd", 20);
+    right_thrust_angle_pub = nh.advertise<std_msgs::Float32>("/wamv/thrusters/right_thrust_angle", 20);
+    right_thrust_cmd_pub = nh.advertise<std_msgs::Float32>("/wamv/thrusters/right_thrust_cmd", 20);
+    ref_states_pub = nh.advertise<gazebo_msgs::ModelStates>("/wamv/ref_pose",20);
+    error_states_pub = nh.advertise<gazebo_msgs::ModelStates>("/wamv/error_pose",20);
     // initialize
+    for(unsigned int i=0; i < WAMV_NU; i++) acados_out.u0[i] = 0.0;
+    for(unsigned int i=0; i < WAMV_NX; i++) acados_in.x0[i] = 0.0;
     is_start = false;
 }
 
@@ -69,14 +76,14 @@ void WAMV_MPC::states_cb(const gazebo_msgs::ModelStates::ConstPtr& msg)
     local_pos.z = msg->pose[17].position.z;
 
     // get linear vel u v w
-    linear_vel_inertial.u = msg->twist[17].linear.x;
-    linear_vel_inertial.v = msg->twist[17].linear.y;
-    linear_vel_inertial.w = msg->twist[17].linear.z;
+    local_pos.u = msg->twist[17].linear.x;
+    local_pos.v = msg->twist[17].linear.y;
+    local_pos.w = msg->twist[17].linear.z;
 
     // get angular vel p q r
-    angular_vel_inertial.p = msg->twist[17].angular.x;
-    angular_vel_inertial.q = msg->twist[17].angular.y;
-    angular_vel_inertial.r = msg->twist[17].angular.z;
+    local_pos.p = msg->twist[17].angular.x;
+    local_pos.q = msg->twist[17].angular.y;
+    local_pos.r = msg->twist[17].angular.z;
 
     // get angle phi, theta, psi
     tf::quaternionMsgToTF(msg->pose[17].orientation, tf_quaternion);
@@ -87,16 +94,178 @@ void WAMV_MPC::states_cb(const gazebo_msgs::ModelStates::ConstPtr& msg)
     // extract roll, pitch, and yaw
     tf::Matrix3x3(tf_quaternion).getRPY(local_euler.phi, local_euler.theta, local_euler.psi);
     
+    v_inertial << local_pos.u, local_pos.v, local_pos.r;
+    R_ib << cos(local_euler.psi), -sin(local_euler.psi), 0,
+            sin(local_euler.psi), cos(local_euler.psi), 0,
+            0, 0, 1;
+    v_body = R_ib.inverse()*v_inertial;
+
+}
+
+// read trajectory data
+int WAMV_MPC::readDataFromFile(const char* fileName, std::vector<std::vector<double>> &data)
+{
+	std::ifstream file(fileName);
+	std::string line;
+	int number_of_lines = 0;
+
+	if (file.is_open())
+	{
+        std::cout<<"file is open"<<std::endl;
+		while(getline(file, line)){
+			number_of_lines++;
+			std::istringstream linestream( line );
+			std::vector<double> linedata;
+			double number;
+
+			while( linestream >> number ){
+				linedata.push_back( number );
+			}
+			data.push_back( linedata );
+		}
+
+		file.close();
+	}
+	else
+	{
+        std::cout<<"file not open"<<std::endl;
+		return 0;
+	}
+
+	return number_of_lines;
+}
+void WAMV_MPC::ref_cb(int line_to_read)
+{
+    if (WAMV_N+line_to_read+1 <= number_of_steps)  // All ref points within the file
+    {
+        for (unsigned int i = 0; i <= WAMV_N; i++)  // Fill all horizon with file data
+        {
+            for (unsigned int j = 0; j <= WAMV_NY; j++)
+            {
+                acados_in.yref[i][j] = trajectory[i+line_to_read][j];
+            }
+        }
+    }
+    else if(line_to_read < number_of_steps)    // Part of ref points within the file
+    {
+        for (unsigned int i = 0; i < number_of_steps-line_to_read; i++)    // Fill part of horizon with file data
+        {
+            
+            for (unsigned int j = 0; j <= WAMV2_NY; j++)
+            {
+                acados_in.yref[i][j] = trajectory[i+line_to_read][j];
+            }
+            
+        }
+
+        for (unsigned int i = number_of_steps-line_to_read; i <= WAMV2_N; i++)  // Fill the rest horizon with the last point
+        {
+            
+            for (unsigned int j = 0; j <= WAMV2_NY; j++)
+            {
+                acados_in.yref[i][j] = trajectory[number_of_steps-1][j];
+            }
+            
+        }
+    }
+    else    // none of ref points within the file
+    {
+        for (unsigned int i = 0; i <= WAMV_N; i++)  // Fill all horizon with the last point
+        {
+            
+            for (unsigned int j = 0; j <= WAMV_NY; j++)
+            {
+                acados_in.yref[i][j] = trajectory[number_of_steps-1][j];
+            }
+            
+        }
+    }
+    
 }
 
 void WAMV_MPC::solve()
 {
+    // identify turning direction
+    if (pre_yaw >= 0 && local_euler.psi >=0)
+    {
+        yaw_diff = local_euler.psi - pre_yaw;
+    }
+    else if (pre_yaw >= 0 && local_euler.psi <0)
+    {
+        if (2*M_PI+local_euler.psi-pre_yaw >= pre_yaw+abs(local_euler.psi))
+        {
+            yaw_diff = -(pre_yaw + abs(local_euler.psi));
+        }
+        else
+        {
+            yaw_diff = 2 * M_PI + local_euler.psi - pre_yaw;
+        }
+    }
+    else if (pre_yaw < 0 && local_euler.psi >= 0)
+    {
+        if (2*M_PI-local_euler.psi+pre_yaw >= abs(pre_yaw)+local_euler.psi)
+        {
+            yaw_diff = abs(pre_yaw)+local_euler.psi;
+        }
+        else
+        {
+            yaw_diff = -(2*M_PI-local_euler.psi+pre_yaw);
+        }
+    }
+    else
+    {
+        yaw_diff = local_euler.psi - pre_yaw;
+    }
+
+    yaw_sum = yaw_sum + yaw_diff;
+    pre_yaw = local_euler.psi;
+
+    // set initial states
+    acados_in.x0[x] = local_pos.x;
+    acados_in.x0[y] = local_pos.y;
+    acados_in.x0[psi] = yaw_sum;
+    acados_in.x0[u] = v_body[0];
+    acados_in.x0[v] = v_body[1];
+    acados_in.x0[r] = v_body[2];
+    ocp_nlp_constraints_model_set(mpc_capsule->nlp_config,mpc_capsule->nlp_dims,mpc_capsule->nlp_in, 0, "lbx", acados_in.x0);
+    ocp_nlp_constraints_model_set(mpc_capsule->nlp_config,mpc_capsule->nlp_dims,mpc_capsule->nlp_in, 0, "ubx", acados_in.x0);
+
+    // change into form of (-pi, pi)
+    if(sin(acados_in.yref[0][2]) >= 0)
+    {
+        yaw_ref = fmod(acados_in.yref[0][5],M_PI);
+    }
+    else{
+        yaw_ref = -M_PI + fmod(acados_in.yref[0][5],M_PI);
+    }
+
+    // set reference
+    ref_cb(line_number); 
+    line_number++;
+    for (unsigned int i = 0; i <= WAMV_N; i++){
+        ocp_nlp_cost_model_set(mpc_capsule->nlp_config, mpc_capsule->nlp_dims, mpc_capsule->nlp_in, i, "yref", acados_in.yref[i]);
+    }
+
+    // Solve OCP
+    acados_status = wamv_acados_solve(mpc_capsule);
+
+    if (acados_status != 0){
+        ROS_INFO_STREAM("acados returned status " << acados_status << std::endl);
+    }
+
+    acados_out.status = acados_status;
+    acados_out.kkt_res = (double)mpc_capsule->nlp_out->inf_norm_res;
+
+    ocp_nlp_get(mpc_capsule->nlp_config, mpc_capsule->nlp_solver, "time_tot", &acados_out.cpu_time);
+
+    ocp_nlp_out_get(mpc_capsule->nlp_config, mpc_capsule->nlp_dims, mpc_capsule->nlp_out, 0, "u", (void *)acados_out.u0);
+
     if(cout_counter > 2){
         std::cout << "---------------------------------------------------------------------------------------------------------------------" << std::endl;
         std::cout << "pos_x:  " << local_pos.x << "  pos_y:  " << local_pos.y << "  pos_z:  " << local_pos.z << std::endl;
         std::cout << "phi:  " << local_euler.phi << "  theta:  " << local_euler.theta << "  psi:  " << local_euler.psi << std::endl;
-        std::cout << "vel_x:  " << linear_vel_inertial.u << "  vel_y:  " << linear_vel_inertial.v << "  vel_z:  " << linear_vel_inertial.w << std::endl;
-        std::cout << "vel_p:  " << angular_vel_inertial.p << "  vel_q:  " << angular_vel_inertial.q << "  vel_r:  " << angular_vel_inertial.r << std::endl;
+        std::cout << "vel_x:  " << local_pos.u << "  vel_y:  " << local_pos.v << "  vel_z:  " << local_pos.w << std::endl;
+        std::cout << "vel_p:  " << local_pos.p << "  vel_q:  " << local_pos.q << "  vel_r:  " << local_pos.r << std::endl;
         std::cout << "---------------------------------------------------------------------------------------------------------------------" << std::endl;
         cout_counter = 0;
     }
