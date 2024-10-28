@@ -9,6 +9,7 @@
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 
 #include <gazebo_msgs/ModelStates.h>
+#include <std_msgs/Float32.h>
 
 #include <iostream>
 #include <fstream>
@@ -16,18 +17,20 @@
 #include <tuple>
 #include <iomanip>
 #include <random>
+#include <algorithm>
+#include <limits>
 
-// #include "acados/utils/print.h"
-// #include "acados_c/ocp_nlp_interface.h"
-// #include "acados_c/external_function_interface.h"
-// #include "acados/ocp_nlp/ocp_nlp_constraints_bgh.h"
-// #include "acados/ocp_nlp/ocp_nlp_cost_ls.h"
+#include "acados/utils/print.h"
+#include "acados_c/ocp_nlp_interface.h"
+#include "acados_c/external_function_interface.h"
+#include "acados/ocp_nlp/ocp_nlp_constraints_bgh.h"
+#include "acados/ocp_nlp/ocp_nlp_cost_ls.h"
 
-// #include "blasfeo/include/blasfeo_d_aux.h"
-// #include "blasfeo/include/blasfeo_d_aux_ext_dep.h"
+#include "blasfeo/include/blasfeo_d_aux.h"
+#include "blasfeo/include/blasfeo_d_aux_ext_dep.h"
 
-// #include "bluerov2_model/bluerov2_model.h"
-// #include "acados_solver_bluerov2.h"
+#include "wamv_model/wamv_model.h"
+#include "acados_solver_wamv.h"
 
 using namespace Eigen;
 
@@ -61,12 +64,6 @@ class WAMV_MPC{
         double status, kkt_res, cpu_time;
     };
 
-    // struct Thrust{
-    //     double left_thrust_angle;
-    //     double left_thrust_cmd;
-    //     double right_thrust_angle;
-    //     double right_thrust_cmd;
-    // };
     struct LinearPos{
         double x;
         double y;
@@ -79,30 +76,14 @@ class WAMV_MPC{
         double r;
     };
 
-    // struct LinearVel{
-    //     double u;
-    //     double v;
-    //     double w;
-    // };
-
     struct Euler{
         double phi;
         double theta;
         double psi;
     };
 
-    // struct AngularVel{
-    //     double p;
-    //     double q;
-    //     double r;
-    // };
-
     LinearPos local_pos;
     Euler local_euler;
-    // LinearVel linear_vel_inertial;
-    // LinearVel linear_vel_body;
-    // AngularVel angular_vel_inertial;
-    // AngularVel angular_vel_body;
 
     // ROS message variables
     std_msgs::Float32 left_thrust_angle;
@@ -126,12 +107,14 @@ class WAMV_MPC{
     std::string WRENCH_TZ;
     int READ_WRENCH;        // 0: periodic disturbance; 1: random disturbance; 2: read wrench from text
     bool COMPENSATE_D;       // 0: no compensate; 1: compensate
-    SolverParam solver_param;
+    // SolverParam solver_param;
 
     // dynamics parameters
     Matrix<double,3,3> R_ib;            // rotation matrix for linear from inertial to body frame
     Matrix<double,3,1> v_body;      // velocity u, v, r in body frame
     Matrix<double,3,1> v_inertial;  // velocity u, v, r in inertial frame
+    double Tp_cmd;
+    double Ts_cmd;
 
     // Time
     ros::Time current_time;
@@ -173,6 +156,8 @@ class WAMV_MPC{
     int readDataFromFile(const char* fileName, std::vector<std::vector<double>> &data);     // read trajectory
     void ref_cb(int line_to_read);
     void solve();                                           // solve MPC
+    void publish_cin(double Tp, double Ts, double delta_p, double delta_s);
+    double thrustToCmd(double glf_T, double glf_A, double glf_K, double glf_B, double glf_v, double glf_C, double glf_M);
 };
 
 #endif

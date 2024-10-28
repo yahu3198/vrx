@@ -1,5 +1,5 @@
 from acados_template import AcadosModel
-from casadi import SX, vertcat, sin, cos
+from casadi import SX, vertcat, sin, cos, exp, fmax
 import numpy as np
 from scipy.linalg import block_diag
 import math
@@ -29,6 +29,15 @@ def export_wamv_model() -> AcadosModel:
     delta_p = SX.sym('delta_p')          # port angle
     delta_s = SX.sym('delta_s')          # starboard angle
     sym_u = vertcat(Tp,Ts,delta_p,delta_s)
+
+    # # parameters
+    # glf_A = SX.sym('glf_A')
+    # glf_K = SX.sym('glf_K')
+    # glf_B = SX.sym('glf_B')
+    # glf_v = SX.sym('glf_v')
+    # glf_C = SX.sym('glf_C')
+    # glf_M = SX.sym('glf_M')
+    # sym_p = vertcat(glf_A,glf_K,glf_B,glf_v,glf_C,glf_M)
 
     # xdot for f_impl
     x_dot = SX.sym('x_dot')
@@ -62,6 +71,11 @@ def export_wamv_model() -> AcadosModel:
     M = np.diag([m+added_mass[0], m+added_mass[1], m+added_mass[2], Izz+added_mass[5]]) # M_RB + M_A
     M_inv = np.linalg.inv(M)
     
+    # # glf function: cmd to thrust
+    # glf_v = fmax(glf_v, 1e-3)
+    # Tp = glf_A + (glf_K-glf_A)/(glf_C + exp(-glf_B * (Tp_cmd - glf_M)))**(1/glf_v)
+    # Ts = glf_A + (glf_K-glf_A)/(glf_C + exp(-glf_B * (Ts_cmd - glf_M)))**(1/glf_v)
+
     # thrust allocation
     Tx = Tp*cos(delta_p) + Ts*cos(delta_s)
     Ty = Tp*sin(delta_p) + Ts*sin(delta_s)
@@ -91,6 +105,7 @@ def export_wamv_model() -> AcadosModel:
     model.x = sym_x
     model.xdot = sym_xdot
     model.u = sym_u
+    # model.p = sym_p
     model.cost_y_expr = cost_y_expr
     model.cost_y_expr_e = sym_x
     #model.con_h_expr = h_expr

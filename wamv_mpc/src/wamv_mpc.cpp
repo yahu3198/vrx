@@ -16,7 +16,12 @@ WAMV_MPC::WAMV_MPC(ros::NodeHandle& nh)
     // nh.getParam("/wamv_mpc_node/disturbance_phi", solver_param.disturbance_phi);
     // nh.getParam("/wamv_mpc_node/disturbance_theta", solver_param.disturbance_theta);
     // nh.getParam("/wamv_mpc_node/disturbance_psi", solver_param.disturbance_psi);
-    
+    // nh.getParam("/wamv_mpc_node/glf_A", solver_param.glf_A);
+    // nh.getParam("/wamv_mpc_node/glf_K", solver_param.glf_K);
+    // nh.getParam("/wamv_mpc_node/glf_B", solver_param.glf_B);
+    // nh.getParam("/wamv_mpc_node/glf_v", solver_param.glf_v);
+    // nh.getParam("/wamv_mpc_node/glf_C", solver_param.glf_C);
+    // nh.getParam("/wamv_mpc_node/glf_M", solver_param.glf_M);
     // Pre-load the trajectory
     const char * c = REF_TRAJ.c_str();
 	number_of_steps = readDataFromFile(c, trajectory);
@@ -43,6 +48,7 @@ WAMV_MPC::WAMV_MPC(ros::NodeHandle& nh)
     right_thrust_cmd_pub = nh.advertise<std_msgs::Float32>("/wamv/thrusters/right_thrust_cmd", 20);
     ref_states_pub = nh.advertise<gazebo_msgs::ModelStates>("/wamv/ref_pose",20);
     error_states_pub = nh.advertise<gazebo_msgs::ModelStates>("/wamv/error_pose",20);
+    
     // initialize
     for(unsigned int i=0; i < WAMV_NU; i++) acados_out.u0[i] = 0.0;
     for(unsigned int i=0; i < WAMV_NX; i++) acados_in.x0[i] = 0.0;
@@ -151,17 +157,17 @@ void WAMV_MPC::ref_cb(int line_to_read)
         for (unsigned int i = 0; i < number_of_steps-line_to_read; i++)    // Fill part of horizon with file data
         {
             
-            for (unsigned int j = 0; j <= WAMV2_NY; j++)
+            for (unsigned int j = 0; j <= WAMV_NY; j++)
             {
                 acados_in.yref[i][j] = trajectory[i+line_to_read][j];
             }
             
         }
 
-        for (unsigned int i = number_of_steps-line_to_read; i <= WAMV2_N; i++)  // Fill the rest horizon with the last point
+        for (unsigned int i = number_of_steps-line_to_read; i <= WAMV_N; i++)  // Fill the rest horizon with the last point
         {
             
-            for (unsigned int j = 0; j <= WAMV2_NY; j++)
+            for (unsigned int j = 0; j <= WAMV_NY; j++)
             {
                 acados_in.yref[i][j] = trajectory[number_of_steps-1][j];
             }
@@ -260,16 +266,68 @@ void WAMV_MPC::solve()
 
     ocp_nlp_out_get(mpc_capsule->nlp_config, mpc_capsule->nlp_dims, mpc_capsule->nlp_out, 0, "u", (void *)acados_out.u0);
 
+    publish_cin(acados_out.u0[0], acados_out.u0[1], acados_out.u0[2], acados_out.u0[3]);
+
     if(cout_counter > 2){
         std::cout << "---------------------------------------------------------------------------------------------------------------------" << std::endl;
+        std::cout << "ref_x:    " << acados_in.yref[0][0] << "\tref_y:   " << acados_in.yref[0][1] << "\tref_yaw:    " << yaw_ref << std::endl;
         std::cout << "pos_x:  " << local_pos.x << "  pos_y:  " << local_pos.y << "  pos_z:  " << local_pos.z << std::endl;
         std::cout << "phi:  " << local_euler.phi << "  theta:  " << local_euler.theta << "  psi:  " << local_euler.psi << std::endl;
         std::cout << "vel_x:  " << local_pos.u << "  vel_y:  " << local_pos.v << "  vel_z:  " << local_pos.w << std::endl;
         std::cout << "vel_p:  " << local_pos.p << "  vel_q:  " << local_pos.q << "  vel_r:  " << local_pos.r << std::endl;
+        std::cout << "Tp:  " << acados_out.u0[0] << "  Ts:  " << acados_out.u0[1] << "  delta_p:  " << acados_out.u0[2] << "  delta_s:  " << acados_out.u0[3] << std::endl;
+        std::cout << "Tp_cmd  " << Tp_cmd << "  Ts_cmd:  " << Ts_cmd << std::endl;
+        std::cout << "solve_time: "<< acados_out.cpu_time << "\tkkt_res: " << acados_out.kkt_res << "\tacados_status: " << acados_out.status << std::endl;
+        std::cout << "ros_time:   " << std::fixed << ros::Time::now().toSec() << std::endl;
         std::cout << "---------------------------------------------------------------------------------------------------------------------" << std::endl;
         cout_counter = 0;
     }
     else{
         cout_counter++;
     }
+}
+
+void WAMV_MPC::publish_cin(double Tp, double Ts, double delta_p, double delta_s)
+{
+    if (Tp > 0.01)
+    {
+        Tp_cmd = thrustToCmd(Tp, 0.01, 59.82, 5.0, 0.38, 0.56, 0.28);
+    }
+    else if (Tp < 0.01)
+    {
+        Tp_cmd = thrustToCmd(Tp, -199.13, -0.09, 8.84, 5.34, 0.99, -0.57);
+    }
+    if (Ts > 0.01)
+    {
+        Ts_cmd = thrustToCmd(Ts, 0.01, 59.82, 5.0, 0.38, 0.56, 0.28);
+    }
+    else if (Ts < 0.01)
+    {
+        Ts_cmd = thrustToCmd(Tp, -199.13, -0.09, 8.84, 5.34, 0.99, -0.57);
+    }
+    left_thrust_angle.data = delta_p;
+    left_thrust_cmd.data = Tp_cmd;
+    right_thrust_angle.data = delta_s;
+    right_thrust_cmd.data = Ts_cmd;
+
+    // publish control inputs
+    left_thrust_angle_pub.publish(left_thrust_angle);
+    left_thrust_cmd_pub.publish(left_thrust_cmd);
+    right_thrust_angle_pub.publish(right_thrust_angle);
+    right_thrust_cmd_pub.publish(right_thrust_cmd);
+
+}
+
+double WAMV_MPC::thrustToCmd(double glf_T, double glf_A, double glf_K, double glf_B, double glf_v, double glf_C, double glf_M)
+{
+    double term = (glf_K - glf_A) / (glf_T - glf_A);
+    double exponent = std::pow(term, glf_v) - glf_C;
+    // Check if the exponent is positive before applying log
+    if (exponent <= 0) 
+    {
+        throw std::runtime_error("Invalid input: log argument must be positive.");
+    }
+
+    double cmd = glf_M - (1.0 / glf_B) * std::log(exponent);
+    return cmd;
 }
