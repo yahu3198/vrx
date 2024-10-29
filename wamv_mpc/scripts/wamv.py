@@ -1,5 +1,5 @@
 from acados_template import AcadosModel
-from casadi import SX, vertcat, sin, cos, exp, fmax
+from casadi import SX, vertcat, sin, cos, exp, fmax, fabs
 import numpy as np
 from scipy.linalg import block_diag
 import math
@@ -65,11 +65,17 @@ def export_wamv_model() -> AcadosModel:
     xg = -0.003514
     yg = -0.000965
     zg = 0.255206
-    LCG = 1.3
-    B = 1.83
+    LCG = 2.373776
+    B = 2.05427
     added_mass = np.array([0,0,0,0,0,0])
-    M = np.diag([m+added_mass[0], m+added_mass[1], m+added_mass[2], Izz+added_mass[5]]) # M_RB + M_A
+    M = np.diag([m+added_mass[0], m+added_mass[1], Izz+added_mass[5]]) # M_RB + M_A
     M_inv = np.linalg.inv(M)
+    xu = 51.3
+    xuu = 72.14
+    yv = 40
+    yvv = 0
+    nr = 400
+    nrr = 0
     
     # # glf function: cmd to thrust
     # glf_v = fmax(glf_v, 1e-3)
@@ -82,9 +88,9 @@ def export_wamv_model() -> AcadosModel:
     Mz = -LCG*Tp*cos(delta_p) - B/2*Tp*sin(delta_p) - LCG*Ts*cos(delta_s) + B/2*Ts*sin(delta_s)
 
     # dynamics
-    du = M_inv[0,0]*(Tx + m*v*r + m*xg*r*r)
-    dv = M_inv[1,1]*(Ty - m*u*r + m*yg*r*r)
-    dr = M_inv[2,2]*(Mz - m*xg*r*u - m*yg*r*v)
+    du = M_inv[0,0]*(Tx + m*v*r + m*xg*r*r + xu + xuu*fabs(u))
+    dv = M_inv[1,1]*(Ty - m*u*r + m*yg*r*r + yv + yvv*fabs(v))
+    dr = M_inv[2,2]*(Mz - m*xg*r*u - m*yg*r*v + nr + nrr*fabs(r))
     
     dx = cos(psi)*u - sin(psi)*v
     dy = sin(psi)*u + cos(psi)*v

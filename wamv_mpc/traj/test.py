@@ -10,7 +10,7 @@ sample_time = 0.05
 duration = 80                   # seconds
 max_forward_speed = 1.5
 
-v = 1.5
+v = 0.4
 
 r = 1.5
 x0 = 0
@@ -47,42 +47,42 @@ for i in range(0,int(duration/sample_time+1)):
     # if i > 150 <= 200:
     #     traj[i,0] = 2.5-0.05*(i-150)
 
-    if i <= 200:
-        traj[i, 0] = 2 * np.sin(2 * np.pi * i / 200)
-    if i > 200:
-        traj[i,0] = 0
-    
+    # if i <= 200:
+    #     traj[i, 0] = 2 * np.sin(2 * np.pi * i / 200)
+    # if i > 200:
+    #     traj[i,0] = 0
+    traj[i,0] = v*i*sample_time
 
-for i in range(0,int(duration/sample_time+1)):
-    # Y
-    # if i > 200 <= 250:
-    #     traj[i,1] = 0.075*(i-200)
-    # if i > 250 <= 300:
-    #     traj[i,1] = 3.75-0.075*(i-250)
-    # if i > 300 <= 350:
-    #     traj[i,1] = 0.05*(i-300)
-    # if i > 350 <= 400:
-    #     traj[i,1] = 2.5-0.05*(i-350)
-    if i > 200 <= 400:
-        traj[i, 1] = 2 * np.sin(2 * np.pi * i / 200)
-    if i > 400:
-        traj[i,1] = 0
+# for i in range(0,int(duration/sample_time+1)):
+#     # Y
+#     # if i > 200 <= 250:
+#     #     traj[i,1] = 0.075*(i-200)
+#     # if i > 250 <= 300:
+#     #     traj[i,1] = 3.75-0.075*(i-250)
+#     # if i > 300 <= 350:
+#     #     traj[i,1] = 0.05*(i-300)
+#     # if i > 350 <= 400:
+#     #     traj[i,1] = 2.5-0.05*(i-350)
+#     if i > 200 <= 400:
+#         traj[i, 1] = 2 * np.sin(2 * np.pi * i / 200)
+#     if i > 400:
+#         traj[i,1] = 0
 
-for i in range(0,int(duration/sample_time+1)):
-    # N
-    # if i > 400 <= 450:
-    #     traj[i,2] = -20 + 0.075*(i-400)
-    # if i > 450 <= 500:
-    #     traj[i,2] = -16.25 - 0.075*(i-450)
-    # if i > 500 <= 550:
-    #     traj[i,2] = -20 + 0.05*(i-500)
-    # if i > 550 <= 600:
-    #     traj[i,2] = -17.5 - 0.05*(i-550)
+# for i in range(0,int(duration/sample_time+1)):
+#     # N
+#     # if i > 400 <= 450:
+#     #     traj[i,2] = -20 + 0.075*(i-400)
+#     # if i > 450 <= 500:
+#     #     traj[i,2] = -16.25 - 0.075*(i-450)
+#     # if i > 500 <= 550:
+#     #     traj[i,2] = -20 + 0.05*(i-500)
+#     # if i > 550 <= 600:
+#     #     traj[i,2] = -17.5 - 0.05*(i-550)
 
-    if i > 400 <= 600:
-        traj[i, 2] = 2 * np.sin(2 * np.pi * i / 200)
-    if i > 600:
-        traj[i,2] = 0
+#     if i > 400 <= 600:
+#         traj[i, 2] = 2 * np.sin(2 * np.pi * i / 200)
+#     if i > 600:
+#         traj[i,2] = 0
 
 
 

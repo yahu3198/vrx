@@ -6,22 +6,7 @@ WAMV_MPC::WAMV_MPC(ros::NodeHandle& nh)
     nh.getParam("/wamv_mpc_node/read_wrench",READ_WRENCH);
     nh.getParam("/wamv_mpc_node/compensate_d",COMPENSATE_D);
     nh.getParam("/wamv_mpc_node/ref_traj", REF_TRAJ);
-    // nh.getParam("/wamv_mpc_node/applied_forcex", WRENCH_FX);
-    // nh.getParam("/wamv_mpc_node/applied_forcey", WRENCH_FY);
-    // nh.getParam("/wamv_mpc_node/applied_forcez", WRENCH_FZ);
-    // nh.getParam("/wamv_mpc_node/applied_torquez", WRENCH_TZ);
-    // nh.getParam("/wamv_mpc_node/disturbance_x", solver_param.disturbance_x);
-    // nh.getParam("/wamv_mpc_dob_node/disturbance_y", solver_param.disturbance_y);
-    // nh.getParam("/wamv_mpc_node/disturbance_z", solver_param.disturbance_z);
-    // nh.getParam("/wamv_mpc_node/disturbance_phi", solver_param.disturbance_phi);
-    // nh.getParam("/wamv_mpc_node/disturbance_theta", solver_param.disturbance_theta);
-    // nh.getParam("/wamv_mpc_node/disturbance_psi", solver_param.disturbance_psi);
-    // nh.getParam("/wamv_mpc_node/glf_A", solver_param.glf_A);
-    // nh.getParam("/wamv_mpc_node/glf_K", solver_param.glf_K);
-    // nh.getParam("/wamv_mpc_node/glf_B", solver_param.glf_B);
-    // nh.getParam("/wamv_mpc_node/glf_v", solver_param.glf_v);
-    // nh.getParam("/wamv_mpc_node/glf_C", solver_param.glf_C);
-    // nh.getParam("/wamv_mpc_node/glf_M", solver_param.glf_M);
+    
     // Pre-load the trajectory
     const char * c = REF_TRAJ.c_str();
 	number_of_steps = readDataFromFile(c, trajectory);
@@ -53,23 +38,6 @@ WAMV_MPC::WAMV_MPC(ros::NodeHandle& nh)
     for(unsigned int i=0; i < WAMV_NU; i++) acados_out.u0[i] = 0.0;
     for(unsigned int i=0; i < WAMV_NX; i++) acados_in.x0[i] = 0.0;
     is_start = false;
-}
-
-// quaternion to euler angle
-WAMV_MPC::Euler WAMV_MPC::q2rpy(const geometry_msgs::Quaternion& quaternion)
-{
-    tf::Quaternion tf_quaternion;
-    Euler euler;
-    tf::quaternionMsgToTF(quaternion,tf_quaternion);
-    tf::Matrix3x3(tf_quaternion).getRPY(euler.phi, euler.theta, euler.psi);
-    return euler;
-}
-
-// euler angle to quaternion
-geometry_msgs::Quaternion WAMV_MPC::rpy2q(const Euler& euler)
-{
-    geometry_msgs::Quaternion quaternion = tf::createQuaternionMsgFromRollPitchYaw(euler.phi, euler.theta, euler.psi);
-    return quaternion;
 }
 
 // subscribe pos and vel
@@ -198,7 +166,6 @@ void WAMV_MPC::solve()
     }
     else if (pre_yaw >= 0 && local_euler.psi <0)
     {
-        std::cout<<"test3.0"<<std::endl;
         if (2*M_PI+local_euler.psi-pre_yaw >= pre_yaw+abs(local_euler.psi))
         {
             yaw_diff = -(pre_yaw + abs(local_euler.psi));
@@ -290,19 +257,21 @@ void WAMV_MPC::solve()
 
 void WAMV_MPC::publish_cin(double Tp, double Ts, double delta_p, double delta_s)
 {
-    if (Tp > 0.01)
+    Tp_cmd = 0.1;
+    Ts_cmd = 0.1;
+    if (Tp > 1.21)
     {
         Tp_cmd = thrustToCmd(Tp, 0.01, 59.82, 5.0, 0.38, 0.56, 0.28);
     }
-    else if (Tp < 0.01)
+    else if (Tp < 0.061)
     {
         Tp_cmd = thrustToCmd(Tp, -199.13, -0.09, 8.84, 5.34, 0.99, -0.57);
     }
-    if (Ts > 0.01)
+    if (Ts > 1.21)
     {
         Ts_cmd = thrustToCmd(Ts, 0.01, 59.82, 5.0, 0.38, 0.56, 0.28);
     }
-    else if (Ts < 0.01)
+    else if (Ts < 0.061)
     {
         Ts_cmd = thrustToCmd(Tp, -199.13, -0.09, 8.84, 5.34, 0.99, -0.57);
     }
@@ -324,10 +293,10 @@ double WAMV_MPC::thrustToCmd(double glf_T, double glf_A, double glf_K, double gl
     double term = (glf_K - glf_A) / (glf_T - glf_A);
     double exponent = std::pow(term, glf_v) - glf_C;
     // Check if the exponent is positive before applying log
-    if (exponent <= 0) 
-    {
-        throw std::runtime_error("Invalid input: log argument must be positive.");
-    }
+    // if (exponent <= 0) 
+    // {
+    //     throw std::runtime_error("Invalid input: log argument must be positive.");
+    // }
 
     double cmd = glf_M - (1.0 / glf_B) * std::log(exponent);
     return cmd;

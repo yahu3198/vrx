@@ -1,6 +1,6 @@
 read_wrench: 0
 compensate_d: false
-ref_traj: /home/yang/usv_ws/src/vrx/wamv_mpc/traj/stationary.txt
+ref_traj: /home/yang/usv_ws/src/vrx/wamv_mpc/traj/test.txt
 # applied_forcex: /home/yang/bluerov_ws/src/bluerov2/bluerov2_dobmpc/config/forcex.txt
 # applied_forcey: /home/yang/bluerov_ws/src/bluerov2/bluerov2_dobmpc/config/forcey.txt
 # applied_forcez: /home/yang/bluerov_ws/src/bluerov2/bluerov2_dobmpc/config/forcez.txt

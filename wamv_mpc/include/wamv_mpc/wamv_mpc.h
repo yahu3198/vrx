@@ -17,8 +17,6 @@
 #include <tuple>
 #include <iomanip>
 #include <random>
-#include <algorithm>
-#include <limits>
 
 #include "acados/utils/print.h"
 #include "acados_c/ocp_nlp_interface.h"
@@ -150,8 +148,6 @@ class WAMV_MPC{
     bool is_start;
 
     WAMV_MPC(ros::NodeHandle&);                        // constructor
-    Euler q2rpy(const geometry_msgs::Quaternion&);          // quaternion to euler angle
-    geometry_msgs::Quaternion rpy2q(const Euler&);          // euler angle to quaternion
     void states_cb(const gazebo_msgs::ModelStates::ConstPtr& msg);  // subscribe pos and vel
     int readDataFromFile(const char* fileName, std::vector<std::vector<double>> &data);     // read trajectory
     void ref_cb(int line_to_read);

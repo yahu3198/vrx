@@ -30,8 +30,8 @@ def main():
     # ocp.parameter_values = np.zeros((nparam, ))
     
     # set cost
-    W_x = np.diag([380, 420, 150, 10, 10, 10])    #Q_mat
-    W_u = np.diag([15, 15, 5, 5])                           #R_mat
+    W_x = np.diag([250, 250, 50, 10, 10, 1])    #Q_mat
+    W_u = np.diag([0.1, 0.1, 150, 150])                           #R_mat
     W = block_diag(W_x, W_u)
     ocp.cost.W_e = W_x
     ocp.cost.W = W
@@ -53,7 +53,7 @@ def main():
 
     # set constraints
     u_min = np.array([-100, -100, -1.57, -1.57])
-    u_max = np.array([250, 250, 1.57, 1.57])
+    u_max = np.array([242, 242, 1.57, 1.57])
     ocp.constraints.lbu = u_min
     ocp.constraints.ubu = u_max
     ocp.constraints.idxbu = np.array([0,1,2,3])         # indices of bounds on u

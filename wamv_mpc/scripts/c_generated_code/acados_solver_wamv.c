@@ -435,16 +435,16 @@ void wamv_acados_setup_nlp_in(wamv_solver_capsule* capsule, const int N, double*
 
    double* W_0 = calloc(NY0*NY0, sizeof(double));
     // change only the non-zero elements:
-    W_0[0+(NY0) * 0] = 380;
-    W_0[1+(NY0) * 1] = 420;
-    W_0[2+(NY0) * 2] = 150;
+    W_0[0+(NY0) * 0] = 250;
+    W_0[1+(NY0) * 1] = 250;
+    W_0[2+(NY0) * 2] = 50;
     W_0[3+(NY0) * 3] = 10;
     W_0[4+(NY0) * 4] = 10;
-    W_0[5+(NY0) * 5] = 10;
-    W_0[6+(NY0) * 6] = 15;
-    W_0[7+(NY0) * 7] = 15;
-    W_0[8+(NY0) * 8] = 5;
-    W_0[9+(NY0) * 9] = 5;
+    W_0[5+(NY0) * 5] = 1;
+    W_0[6+(NY0) * 6] = 0.1;
+    W_0[7+(NY0) * 7] = 0.1;
+    W_0[8+(NY0) * 8] = 150;
+    W_0[9+(NY0) * 9] = 150;
     ocp_nlp_cost_model_set(nlp_config, nlp_dims, nlp_in, 0, "W", W_0);
     free(W_0);
     double* yref = calloc(NY, sizeof(double));
@@ -457,16 +457,16 @@ void wamv_acados_setup_nlp_in(wamv_solver_capsule* capsule, const int N, double*
     free(yref);
     double* W = calloc(NY*NY, sizeof(double));
     // change only the non-zero elements:
-    W[0+(NY) * 0] = 380;
-    W[1+(NY) * 1] = 420;
-    W[2+(NY) * 2] = 150;
+    W[0+(NY) * 0] = 250;
+    W[1+(NY) * 1] = 250;
+    W[2+(NY) * 2] = 50;
     W[3+(NY) * 3] = 10;
     W[4+(NY) * 4] = 10;
-    W[5+(NY) * 5] = 10;
-    W[6+(NY) * 6] = 15;
-    W[7+(NY) * 7] = 15;
-    W[8+(NY) * 8] = 5;
-    W[9+(NY) * 9] = 5;
+    W[5+(NY) * 5] = 1;
+    W[6+(NY) * 6] = 0.1;
+    W[7+(NY) * 7] = 0.1;
+    W[8+(NY) * 8] = 150;
+    W[9+(NY) * 9] = 150;
 
     for (int i = 1; i < N; i++)
     {
@@ -480,12 +480,12 @@ void wamv_acados_setup_nlp_in(wamv_solver_capsule* capsule, const int N, double*
 
     double* W_e = calloc(NYN*NYN, sizeof(double));
     // change only the non-zero elements:
-    W_e[0+(NYN) * 0] = 380;
-    W_e[1+(NYN) * 1] = 420;
-    W_e[2+(NYN) * 2] = 150;
+    W_e[0+(NYN) * 0] = 250;
+    W_e[1+(NYN) * 1] = 250;
+    W_e[2+(NYN) * 2] = 50;
     W_e[3+(NYN) * 3] = 10;
     W_e[4+(NYN) * 4] = 10;
-    W_e[5+(NYN) * 5] = 10;
+    W_e[5+(NYN) * 5] = 1;
     ocp_nlp_cost_model_set(nlp_config, nlp_dims, nlp_in, N, "W", W_e);
     free(W_e);
     ocp_nlp_cost_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, 0, "nls_y_fun", &capsule->cost_y_0_fun);
@@ -554,9 +554,9 @@ void wamv_acados_setup_nlp_in(wamv_solver_capsule* capsule, const int N, double*
     double* lbu = lubu;
     double* ubu = lubu + NBU;
     lbu[0] = -100;
-    ubu[0] = 250;
+    ubu[0] = 242;
     lbu[1] = -100;
-    ubu[1] = 250;
+    ubu[1] = 242;
     lbu[2] = -1.57;
     ubu[2] = 1.57;
     lbu[3] = -1.57;
