@@ -198,6 +198,7 @@ void WAMV_MPC::solve()
     }
     else if (pre_yaw >= 0 && local_euler.psi <0)
     {
+        std::cout<<"test3.0"<<std::endl;
         if (2*M_PI+local_euler.psi-pre_yaw >= pre_yaw+abs(local_euler.psi))
         {
             yaw_diff = -(pre_yaw + abs(local_euler.psi));
