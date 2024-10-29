@@ -9,6 +9,8 @@ int main(int argc, char **argv)
 
     ros::Time start_time = ros::Time::now();
     ros::Duration duration(50.0); // Set the desired duration to 25 seconds
+    // Delay for 5 seconds before entering the loop
+    ros::Duration(5.0).sleep();
 
     WAMV_MPC wm(nh);
     while(ros::ok()){

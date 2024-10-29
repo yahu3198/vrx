@@ -7,6 +7,7 @@
 #include <eigen3/Eigen/Dense>
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>
+#include <nav_msgs/Odometry.h>
 
 #include <gazebo_msgs/ModelStates.h>
 #include <std_msgs/Float32.h>
@@ -88,8 +89,9 @@ class WAMV_MPC{
     std_msgs::Float32 left_thrust_cmd;
     std_msgs::Float32 right_thrust_angle;
     std_msgs::Float32 right_thrust_cmd;
-    gazebo_msgs::ModelStates ref_states;
-    gazebo_msgs::ModelStates error_states;
+    nav_msgs::Odometry ref_pose;
+    nav_msgs::Odometry error_pose;
+    nav_msgs::Odometry pose_gt;
 
     // Acados variables
     SolverInput acados_in;
@@ -125,8 +127,9 @@ class WAMV_MPC{
     ros::Publisher right_thrust_angle_pub;
     ros::Publisher right_thrust_cmd_pub;
     
-    ros::Publisher ref_states_pub;
-    ros::Publisher error_states_pub;
+    ros::Publisher ref_pose_pub;
+    ros::Publisher error_pose_pub;
+    ros::Publisher pose_gt_pub;
 
     // Trajectory variables
     std::vector<std::vector<double>> trajectory;

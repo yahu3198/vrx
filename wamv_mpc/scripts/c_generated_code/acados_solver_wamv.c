@@ -437,7 +437,7 @@ void wamv_acados_setup_nlp_in(wamv_solver_capsule* capsule, const int N, double*
     // change only the non-zero elements:
     W_0[0+(NY0) * 0] = 250;
     W_0[1+(NY0) * 1] = 250;
-    W_0[2+(NY0) * 2] = 50;
+    W_0[2+(NY0) * 2] = 250;
     W_0[3+(NY0) * 3] = 10;
     W_0[4+(NY0) * 4] = 10;
     W_0[5+(NY0) * 5] = 1;
@@ -459,7 +459,7 @@ void wamv_acados_setup_nlp_in(wamv_solver_capsule* capsule, const int N, double*
     // change only the non-zero elements:
     W[0+(NY) * 0] = 250;
     W[1+(NY) * 1] = 250;
-    W[2+(NY) * 2] = 50;
+    W[2+(NY) * 2] = 250;
     W[3+(NY) * 3] = 10;
     W[4+(NY) * 4] = 10;
     W[5+(NY) * 5] = 1;
@@ -482,7 +482,7 @@ void wamv_acados_setup_nlp_in(wamv_solver_capsule* capsule, const int N, double*
     // change only the non-zero elements:
     W_e[0+(NYN) * 0] = 250;
     W_e[1+(NYN) * 1] = 250;
-    W_e[2+(NYN) * 2] = 50;
+    W_e[2+(NYN) * 2] = 250;
     W_e[3+(NYN) * 3] = 10;
     W_e[4+(NYN) * 4] = 10;
     W_e[5+(NYN) * 5] = 1;

@@ -1,0 +1,1 @@
+rosbag record -O test /wamv/ref_pose /wamv/error_pose /wamv/pose_gt /wamv/thrusters/left_thrust_angle /wamv/thrusters/left_thrust_cmd /wamv/thrusters/right_thrust_angle /wamv/thrusters/right_thrust_cmd

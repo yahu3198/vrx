@@ -31,8 +31,9 @@ WAMV_MPC::WAMV_MPC(ros::NodeHandle& nh)
     left_thrust_cmd_pub = nh.advertise<std_msgs::Float32>("/wamv/thrusters/left_thrust_cmd", 20);
     right_thrust_angle_pub = nh.advertise<std_msgs::Float32>("/wamv/thrusters/right_thrust_angle", 20);
     right_thrust_cmd_pub = nh.advertise<std_msgs::Float32>("/wamv/thrusters/right_thrust_cmd", 20);
-    ref_states_pub = nh.advertise<gazebo_msgs::ModelStates>("/wamv/ref_pose",20);
-    error_states_pub = nh.advertise<gazebo_msgs::ModelStates>("/wamv/error_pose",20);
+    ref_pose_pub = nh.advertise<nav_msgs::Odometry>("/wamv/ref_pose",20);
+    error_pose_pub = nh.advertise<nav_msgs::Odometry>("/wamv/error_pose",20);
+    pose_gt_pub = nh.advertise<nav_msgs::Odometry>("/wamv/pose_gt",20);
     
     // initialize
     for(unsigned int i=0; i < WAMV_NU; i++) acados_out.u0[i] = 0.0;
@@ -207,10 +208,10 @@ void WAMV_MPC::solve()
     // change into form of (-pi, pi)
     if(sin(acados_in.yref[0][2]) >= 0)
     {
-        yaw_ref = fmod(acados_in.yref[0][5],M_PI);
+        yaw_ref = fmod(acados_in.yref[0][2],M_PI);
     }
     else{
-        yaw_ref = -M_PI + fmod(acados_in.yref[0][5],M_PI);
+        yaw_ref = -M_PI + fmod(acados_in.yref[0][2],M_PI);
     }
 
     // set reference
@@ -239,6 +240,7 @@ void WAMV_MPC::solve()
     if(cout_counter > 2){
         std::cout << "---------------------------------------------------------------------------------------------------------------------" << std::endl;
         std::cout << "ref_x:    " << acados_in.yref[0][0] << "\tref_y:   " << acados_in.yref[0][1] << "\tref_yaw:    " << yaw_ref << std::endl;
+        std::cout << "error_x:  " << error_pose.pose.pose.position.x << "  error_y:  " << error_pose.pose.pose.position.y << "  error_psi:  " << yaw_error << std::endl;
         std::cout << "pos_x:  " << local_pos.x << "  pos_y:  " << local_pos.y << "  pos_z:  " << local_pos.z << std::endl;
         std::cout << "phi:  " << local_euler.phi << "  theta:  " << local_euler.theta << "  psi:  " << local_euler.psi << std::endl;
         std::cout << "vel_x:  " << local_pos.u << "  vel_y:  " << local_pos.v << "  vel_z:  " << local_pos.w << std::endl;
@@ -285,6 +287,58 @@ void WAMV_MPC::publish_cin(double Tp, double Ts, double delta_p, double delta_s)
     left_thrust_cmd_pub.publish(left_thrust_cmd);
     right_thrust_angle_pub.publish(right_thrust_angle);
     right_thrust_cmd_pub.publish(right_thrust_cmd);
+
+    // publish reference states
+    tf2::Quaternion quat;
+    quat.setRPY(0, 0, yaw_ref);
+    geometry_msgs::Quaternion quat_msg;
+    tf2::convert(quat, quat_msg);
+    ref_pose.pose.pose.position.x = acados_in.yref[0][0];
+    ref_pose.pose.pose.position.y = acados_in.yref[0][1];
+    ref_pose.pose.pose.orientation.x = quat_msg.x;
+    ref_pose.pose.pose.orientation.y = quat_msg.y;
+    ref_pose.pose.pose.orientation.z = quat_msg.z;
+    ref_pose.pose.pose.orientation.w = quat_msg.w;
+    
+    ref_pose.header.stamp = ros::Time::now();
+    ref_pose.header.frame_id = "odom_frame";
+    ref_pose.child_frame_id = "base_link";
+    ref_pose_pub.publish(ref_pose);
+
+    // publish error states
+    tf2::Quaternion quat_error;
+    yaw_error = yaw_sum - acados_in.yref[0][2];
+    quat_error.setRPY(0, 0, yaw_error);
+    geometry_msgs::Quaternion quat_error_msg;
+    tf2::convert(quat_error, quat_error_msg);
+    error_pose.pose.pose.position.x = acados_in.x0[0] - acados_in.yref[0][0];
+    error_pose.pose.pose.position.y = acados_in.x0[1] - acados_in.yref[0][1];
+    error_pose.pose.pose.orientation.x = quat_error_msg.x;
+    error_pose.pose.pose.orientation.y = quat_error_msg.y;
+    error_pose.pose.pose.orientation.z = quat_error_msg.z;
+    error_pose.pose.pose.orientation.w = quat_error_msg.w;
+    error_pose.header.stamp = ros::Time::now();
+    error_pose.header.frame_id = "odom_frame";
+    error_pose.child_frame_id = "base_link";
+
+    error_pose_pub.publish(error_pose);
+
+    // publish pose_gt
+    tf2::Quaternion quat_gt;
+    quat_gt.setRPY(local_euler.phi, local_euler.theta, local_euler.psi);
+    geometry_msgs::Quaternion quat_gt_msg;
+    tf2::convert(quat_gt, quat_gt_msg);
+    pose_gt.pose.pose.position.x = local_pos.x;
+    pose_gt.pose.pose.position.y = local_pos.y;
+    pose_gt.pose.pose.orientation.x = quat_gt_msg.x;
+    pose_gt.pose.pose.orientation.y = quat_gt_msg.y;
+    pose_gt.pose.pose.orientation.z = quat_gt_msg.z;
+    pose_gt.pose.pose.orientation.w = quat_gt_msg.w;
+    
+    pose_gt.header.stamp = ros::Time::now();
+    pose_gt.header.frame_id = "odom_frame";
+    pose_gt.child_frame_id = "base_link";
+    pose_gt_pub.publish(pose_gt);
 
 }
 
