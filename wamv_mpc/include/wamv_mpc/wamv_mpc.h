@@ -8,6 +8,7 @@
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 #include <nav_msgs/Odometry.h>
+#include <geometry_msgs/TwistStamped.h>
 
 #include <gazebo_msgs/ModelStates.h>
 #include <std_msgs/Float32.h>
@@ -92,6 +93,7 @@ class WAMV_MPC{
     nav_msgs::Odometry ref_pose;
     nav_msgs::Odometry error_pose;
     nav_msgs::Odometry pose_gt;
+    geometry_msgs::TwistStamped control_inputs;
 
     // Acados variables
     SolverInput acados_in;
@@ -126,6 +128,8 @@ class WAMV_MPC{
     ros::Publisher left_thrust_cmd_pub;
     ros::Publisher right_thrust_angle_pub;
     ros::Publisher right_thrust_cmd_pub;
+
+    ros::Publisher control_inputs_pub;
     
     ros::Publisher ref_pose_pub;
     ros::Publisher error_pose_pub;

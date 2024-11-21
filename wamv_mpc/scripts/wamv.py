@@ -55,13 +55,13 @@ def export_wamv_model() -> AcadosModel:
     sym_xdot = vertcat(x_dot,y_dot,psi_dot,u_dot,v_dot,r_dot)
 
     # system parameters
-    m = 250.19                                       # mass
-    Ixx = 225.17                                        # inertial
+    m = 180                                       # mass
+    Ixx = 120                                        # inertial
     Ixy = 0.12
     Ixz = 0.99
-    Iyy = 454.14
+    Iyy = 393
     Iyz = 0.29
-    Izz = 499.75
+    Izz = 446
     xg = -0.003514
     yg = -0.000965
     zg = 0.255206
@@ -71,7 +71,7 @@ def export_wamv_model() -> AcadosModel:
     M = np.diag([m+added_mass[0], m+added_mass[1], Izz+added_mass[5]]) # M_RB + M_A
     M_inv = np.linalg.inv(M)
     xu = 51.3
-    xuu = 72.14
+    xuu = 72.4
     yv = 40
     yvv = 0
     nr = 400
@@ -84,13 +84,13 @@ def export_wamv_model() -> AcadosModel:
 
     # thrust allocation
     Tx = Tp*cos(delta_p) + Ts*cos(delta_s)
-    Ty = Tp*sin(delta_p) + Ts*sin(delta_s)
+    Ty = -Tp*sin(delta_p) - Ts*sin(delta_s)
     Mz = -LCG*Tp*cos(delta_p) - B/2*Tp*sin(delta_p) - LCG*Ts*cos(delta_s) + B/2*Ts*sin(delta_s)
 
     # dynamics
-    du = M_inv[0,0]*(Tx + m*v*r + m*xg*r*r + xu + xuu*fabs(u))
-    dv = M_inv[1,1]*(Ty - m*u*r + m*yg*r*r + yv + yvv*fabs(v))
-    dr = M_inv[2,2]*(Mz - m*xg*r*u - m*yg*r*v + nr + nrr*fabs(r))
+    du = M_inv[0,0]*(Tx + m*v*r + m*xg*r*r + xu*u + xuu*fabs(u)*u)
+    dv = M_inv[1,1]*(Ty - m*u*r + m*yg*r*r + yv*v + yvv*fabs(v)*v)
+    dr = M_inv[2,2]*(Mz - m*xg*r*u - m*yg*r*v + nr*r + nrr*fabs(r)*r)
     
     dx = cos(psi)*u - sin(psi)*v
     dy = sin(psi)*u + cos(psi)*v

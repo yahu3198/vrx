@@ -34,7 +34,8 @@ WAMV_MPC::WAMV_MPC(ros::NodeHandle& nh)
     ref_pose_pub = nh.advertise<nav_msgs::Odometry>("/wamv/ref_pose",20);
     error_pose_pub = nh.advertise<nav_msgs::Odometry>("/wamv/error_pose",20);
     pose_gt_pub = nh.advertise<nav_msgs::Odometry>("/wamv/pose_gt",20);
-    
+    control_inputs_pub = nh.advertise<geometry_msgs::TwistStamped>("/wamv/control_inputs", 20);
+
     // initialize
     for(unsigned int i=0; i < WAMV_NU; i++) acados_out.u0[i] = 0.0;
     for(unsigned int i=0; i < WAMV_NX; i++) acados_in.x0[i] = 0.0;
@@ -239,10 +240,10 @@ void WAMV_MPC::solve()
 
     if(cout_counter > 2){
         std::cout << "---------------------------------------------------------------------------------------------------------------------" << std::endl;
-        std::cout << "ref_x:    " << acados_in.yref[0][0] << "\tref_y:   " << acados_in.yref[0][1] << "\tref_yaw:    " << yaw_ref << std::endl;
+        std::cout << "ref_x:    " << acados_in.yref[0][0] << "\tref_y:   " << acados_in.yref[0][1] << "\tref_yaw:    " << acados_in.yref[0][2] << std::endl;
         std::cout << "error_x:  " << error_pose.pose.pose.position.x << "  error_y:  " << error_pose.pose.pose.position.y << "  error_psi:  " << yaw_error << std::endl;
         std::cout << "pos_x:  " << local_pos.x << "  pos_y:  " << local_pos.y << "  pos_z:  " << local_pos.z << std::endl;
-        std::cout << "phi:  " << local_euler.phi << "  theta:  " << local_euler.theta << "  psi:  " << local_euler.psi << std::endl;
+        std::cout << "phi:  " << local_euler.phi << "  theta:  " << local_euler.theta << "  psi:  " << yaw_sum << std::endl;
         std::cout << "vel_x:  " << local_pos.u << "  vel_y:  " << local_pos.v << "  vel_z:  " << local_pos.w << std::endl;
         std::cout << "vel_p:  " << local_pos.p << "  vel_q:  " << local_pos.q << "  vel_r:  " << local_pos.r << std::endl;
         std::cout << "Tp:  " << acados_out.u0[0] << "  Ts:  " << acados_out.u0[1] << "  delta_p:  " << acados_out.u0[2] << "  delta_s:  " << acados_out.u0[3] << std::endl;
@@ -287,6 +288,14 @@ void WAMV_MPC::publish_cin(double Tp, double Ts, double delta_p, double delta_s)
     left_thrust_cmd_pub.publish(left_thrust_cmd);
     right_thrust_angle_pub.publish(right_thrust_angle);
     right_thrust_cmd_pub.publish(right_thrust_cmd);
+
+    geometry_msgs::TwistStamped control_inputs_msg;
+    control_inputs.header.stamp = ros::Time::now();
+    control_inputs.twist.linear.x = delta_p;
+    control_inputs.twist.linear.y = Tp_cmd;
+    control_inputs.twist.angular.x = delta_s;
+    control_inputs.twist.angular.y = Ts_cmd;
+    control_inputs_pub.publish(control_inputs);
 
     // publish reference states
     tf2::Quaternion quat;

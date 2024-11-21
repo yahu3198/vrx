@@ -7,7 +7,7 @@ import math
 
 # Parameters
 sample_time = 0.05             
-duration = 80                   # seconds
+duration = 200                   # seconds
 max_forward_speed = 1.5
 
 v = 0.4
@@ -52,6 +52,7 @@ for i in range(0,int(duration/sample_time+1)):
     # if i > 200:
     #     traj[i,0] = 0
     traj[i,0] = v*i*sample_time
+    # traj[i,2] = -0.2*v*i*sample_time
 
 # for i in range(0,int(duration/sample_time+1)):
 #     # Y
