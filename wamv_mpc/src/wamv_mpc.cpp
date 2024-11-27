@@ -223,20 +223,30 @@ void WAMV_MPC::solve()
     }
 
     // Solve OCP
-    acados_status = wamv_acados_solve(mpc_capsule);
+    // acados_status = wamv_acados_solve(mpc_capsule);
 
-    if (acados_status != 0){
-        ROS_INFO_STREAM("acados returned status " << acados_status << std::endl);
-    }
+    // if (acados_status != 0){
+    //     ROS_INFO_STREAM("acados returned status " << acados_status << std::endl);
+    // }
 
-    acados_out.status = acados_status;
-    acados_out.kkt_res = (double)mpc_capsule->nlp_out->inf_norm_res;
+    // acados_out.status = acados_status;
+    // acados_out.kkt_res = (double)mpc_capsule->nlp_out->inf_norm_res;
 
-    ocp_nlp_get(mpc_capsule->nlp_config, mpc_capsule->nlp_solver, "time_tot", &acados_out.cpu_time);
+    // ocp_nlp_get(mpc_capsule->nlp_config, mpc_capsule->nlp_solver, "time_tot", &acados_out.cpu_time);
 
-    ocp_nlp_out_get(mpc_capsule->nlp_config, mpc_capsule->nlp_dims, mpc_capsule->nlp_out, 0, "u", (void *)acados_out.u0);
+    // ocp_nlp_out_get(mpc_capsule->nlp_config, mpc_capsule->nlp_dims, mpc_capsule->nlp_out, 0, "u", (void *)acados_out.u0);
 
-    publish_cin(acados_out.u0[0], acados_out.u0[1], acados_out.u0[2], acados_out.u0[3]);
+    // publish_cin(acados_out.u0[0], acados_out.u0[1], acados_out.u0[2], acados_out.u0[3]);
+
+    // test control allocation
+    // x
+    // publish_cin(240, 240, 0,0);
+
+    // y
+    // publish_cin(240, 240, 1.57,1.57);
+
+    // yaw
+    publish_cin(240, -100, -1.57, -1.57);
 
     if(cout_counter > 2){
         std::cout << "---------------------------------------------------------------------------------------------------------------------" << std::endl;
