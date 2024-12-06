@@ -223,20 +223,20 @@ void WAMV_MPC::solve()
     }
 
     // Solve OCP
-    // acados_status = wamv_acados_solve(mpc_capsule);
+    acados_status = wamv_acados_solve(mpc_capsule);
 
-    // if (acados_status != 0){
-    //     ROS_INFO_STREAM("acados returned status " << acados_status << std::endl);
-    // }
+    if (acados_status != 0){
+        ROS_INFO_STREAM("acados returned status " << acados_status << std::endl);
+    }
 
-    // acados_out.status = acados_status;
-    // acados_out.kkt_res = (double)mpc_capsule->nlp_out->inf_norm_res;
+    acados_out.status = acados_status;
+    acados_out.kkt_res = (double)mpc_capsule->nlp_out->inf_norm_res;
 
-    // ocp_nlp_get(mpc_capsule->nlp_config, mpc_capsule->nlp_solver, "time_tot", &acados_out.cpu_time);
+    ocp_nlp_get(mpc_capsule->nlp_config, mpc_capsule->nlp_solver, "time_tot", &acados_out.cpu_time);
 
-    // ocp_nlp_out_get(mpc_capsule->nlp_config, mpc_capsule->nlp_dims, mpc_capsule->nlp_out, 0, "u", (void *)acados_out.u0);
+    ocp_nlp_out_get(mpc_capsule->nlp_config, mpc_capsule->nlp_dims, mpc_capsule->nlp_out, 0, "u", (void *)acados_out.u0);
 
-    // publish_cin(acados_out.u0[0], acados_out.u0[1], acados_out.u0[2], acados_out.u0[3]);
+    publish_cin(acados_out.u0[0], acados_out.u0[1], acados_out.u0[2], acados_out.u0[3]);
 
     // test control allocation
     // x
@@ -246,14 +246,14 @@ void WAMV_MPC::solve()
     // publish_cin(240, 240, 1.57,1.57);
 
     // yaw
-    publish_cin(240, -100, -1.57, -1.57);
+    // publish_cin(240, -100, -1.57, -1.57);
 
     if(cout_counter > 2){
         std::cout << "---------------------------------------------------------------------------------------------------------------------" << std::endl;
         std::cout << "ref_x:    " << acados_in.yref[0][0] << "\tref_y:   " << acados_in.yref[0][1] << "\tref_yaw:    " << acados_in.yref[0][2] << std::endl;
         std::cout << "error_x:  " << error_pose.pose.pose.position.x << "  error_y:  " << error_pose.pose.pose.position.y << "  error_psi:  " << yaw_error << std::endl;
-        std::cout << "pos_x:  " << local_pos.x << "  pos_y:  " << local_pos.y << "  pos_z:  " << local_pos.z << std::endl;
-        std::cout << "phi:  " << local_euler.phi << "  theta:  " << local_euler.theta << "  psi:  " << yaw_sum << std::endl;
+        std::cout << "pos_x:  " << local_pos.x << "  pos_y:  " << local_pos.y << "  psi:  " << yaw_sum << std::endl;
+        // std::cout << "phi:  " << local_euler.phi << "  theta:  " << local_euler.theta << "  psi:  " << yaw_sum << std::endl;
         std::cout << "vel_x:  " << local_pos.u << "  vel_y:  " << local_pos.v << "  vel_z:  " << local_pos.w << std::endl;
         std::cout << "vel_p:  " << local_pos.p << "  vel_q:  " << local_pos.q << "  vel_r:  " << local_pos.r << std::endl;
         std::cout << "Tp:  " << acados_out.u0[0] << "  Ts:  " << acados_out.u0[1] << "  delta_p:  " << acados_out.u0[2] << "  delta_s:  " << acados_out.u0[3] << std::endl;

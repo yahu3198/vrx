@@ -5,7 +5,7 @@ from nav_msgs.msg import Odometry
 from std_msgs.msg import Float32
 from tf.transformations import euler_from_quaternion
 
-bag = rosbag.Bag('test211124_2.bag')
+bag = rosbag.Bag('circle061224_3.bag')
 times = {}
 
 # Initialize lists for error_pose
@@ -108,13 +108,13 @@ fig2, axs2 = plt.subplots(3, 1, figsize=(10, 10))
 fig2.suptitle('Reference and True States')
 
 axs2[0].plot(ref_pose_time, ref_pose_x, 'r-', label="Reference X")
-axs2[0].plot(pose_gt_time, pose_gt_x, 'b-', label="Ground Truth X")
+axs2[0].plot(pose_gt_time, pose_gt_x, 'b-', label="MPC X")
 axs2[0].legend()
 axs2[0].set_ylabel("X Position")
 # axs2[0].set_xlim(5, 30)
 
 axs2[1].plot(ref_pose_time, ref_pose_y, 'r-', label="Reference Y")
-axs2[1].plot(pose_gt_time, pose_gt_y, 'b-', label="Ground Truth Y")
+axs2[1].plot(pose_gt_time, pose_gt_y, 'b-', label="MPC Y")
 axs2[1].legend()
 axs2[1].set_ylabel("Y Position")
 # axs2[1].set_xlim(5, 30)
@@ -122,7 +122,7 @@ axs2[1].set_ylabel("Y Position")
 
 
 axs2[2].plot(ref_pose_time, ref_pose_yaw, 'r-', label="Reference Yaw")
-axs2[2].plot(pose_gt_time, pose_gt_yaw, 'b-', label="Ground Truth Yaw")
+axs2[2].plot(pose_gt_time, pose_gt_yaw, 'b-', label="MPC Yaw")
 axs2[2].legend()
 axs2[2].set_ylabel("Yaw")
 # axs2[2].set_ylim(-1, 1)
@@ -147,6 +147,25 @@ axs3[1].plot(control_inputs_time, right_thrust_cmd, 'b-', label="Right Thrust Co
 axs3[1].legend()
 axs3[1].set_ylabel("Thrust Command")
 # axs3[1].set_xlim(5, 30)
+
+# Plot Figure 4: Trajectory in XY Plane
+fig4, ax4 = plt.subplots(figsize=(10, 8))
+fig4.suptitle('Trajectory in XY Plane')
+
+# Plot the reference trajectory in red
+ax4.plot(ref_pose_x, ref_pose_y, 'r-', label="Reference Trajectory")
+
+# Plot the true trajectory in blue
+ax4.plot(pose_gt_x, pose_gt_y, 'b-', label="MPC Trajectory")
+
+# Add labels and legend
+ax4.set_xlabel("X Position")
+ax4.set_ylabel("Y Position")
+ax4.legend()
+
+plt.tight_layout()
+# plt.show()
+
 
 plt.tight_layout()
 plt.show()
