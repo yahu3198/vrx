@@ -17,7 +17,12 @@
   <depend>rclcpp</depend>  <!-- ROS 2 core library for C++ -->
   <depend>geometry_msgs</depend>  <!-- To send geometry messages (e.g., Twist) -->
   <depend>std_msgs</depend>  <!-- For standard messages -->
- 
+  <depend>tf2</depend>
+  <depend>tf2_ros</depend>
+  <depend>gazebo_msgs</depend>
+  <depend>rclpy</depend>
+  <depend>rcl_interfaces</depend>
+
 
   <export>
     <build_type>ament_cmake</build_type>
