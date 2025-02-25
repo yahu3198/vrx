@@ -10,7 +10,7 @@ sample_time = 0.05
 duration = 200                   # seconds
 max_forward_speed = 1.5
 
-v = 0.4
+v = 1
 
 r = 1.5
 x0 = 0

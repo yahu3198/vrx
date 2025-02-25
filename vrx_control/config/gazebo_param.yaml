@@ -2,5 +2,4 @@ wamv_mpc_node:
   ros__parameters:
     read_wrench: 0
     compensate_d: false
-    ref_traj: /home/yang/usv_ws/src/vrx/vrx_control/traj/test.txt
-    yaml_name: /config/gazebo_param.yaml
+    ref_traj: "/home/yang/usv_ws/src/vrx/vrx_control/traj/test.txt"

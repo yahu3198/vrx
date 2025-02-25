@@ -79,7 +79,7 @@ def export_wamv_model() -> AcadosModel:
 
     # thrust allocation
     Tx = Tp*cos(delta_p) + Ts*cos(delta_s)
-    Ty = -Tp*sin(delta_p) - Ts*sin(delta_s)
+    Ty = Tp*sin(delta_p) + Ts*sin(delta_s)
     Mz = -LCG*Tp*cos(delta_p) - B/2*Tp*sin(delta_p) - LCG*Ts*cos(delta_s) + B/2*Ts*sin(delta_s)
 
     # dynamics

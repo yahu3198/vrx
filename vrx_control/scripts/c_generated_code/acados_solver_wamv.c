@@ -631,14 +631,12 @@ void wamv_acados_setup_nlp_in(wamv_solver_capsule* capsule, const int N, double*
     double* lubu = calloc(2*NBU, sizeof(double));
     double* lbu = lubu;
     double* ubu = lubu + NBU;
-    lbu[0] = -100;
-    ubu[0] = 242;
-    lbu[1] = -100;
-    ubu[1] = 242;
-    lbu[2] = -1.57;
-    ubu[2] = 1.57;
-    lbu[3] = -1.57;
-    ubu[3] = 1.57;
+    ubu[0] = 2353;
+    ubu[1] = 2353;
+    lbu[2] = -3.14;
+    ubu[2] = 3.14;
+    lbu[3] = -3.14;
+    ubu[3] = 3.14;
 
     for (int i = 0; i < N; i++)
     {

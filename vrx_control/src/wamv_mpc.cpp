@@ -3,12 +3,18 @@
 WAMV_MPC::WAMV_MPC() 
 : Node("wamv_mpc_node")
 {
+    // Declare parameters with default values
+    this->declare_parameter<int>("read_wrench", 0);
+    this->declare_parameter<bool>("compensate_d", false);
+    this->declare_parameter<std::string>("ref_traj", "");
+
     // Get parameters
     this->get_parameter("read_wrench", READ_WRENCH);
     this->get_parameter("compensate_d", COMPENSATE_D);
     this->get_parameter("ref_traj", REF_TRAJ);
     
     // Pre-load the trajectory
+    // REF_TRAJ = "/home/yang/usv_ws/src/vrx/vrx_control/traj/stationary.txt";
     const char * c = REF_TRAJ.c_str();
 	number_of_steps = readDataFromFile(c, trajectory);
 	if (number_of_steps == 0)
@@ -90,11 +96,11 @@ void WAMV_MPC::states_cb(const nav_msgs::msg::Odometry::SharedPtr msg)
     tf2::Matrix3x3(tf_quaternion).getRPY(local_pos.phi, local_pos.theta, local_pos.psi);
 
     // Convert velocity to body frame
-    v_inertial << local_pos.u, local_pos.v, local_pos.r;
-    R_ib << cos(local_pos.psi), -sin(local_pos.psi), 0,
-            sin(local_pos.psi), cos(local_pos.psi), 0,
-            0, 0, 1;
-    v_body = R_ib.inverse() * v_inertial;
+    // v_inertial << local_pos.u, local_pos.v, local_pos.r;
+    // R_ib << cos(local_pos.psi), -sin(local_pos.psi), 0,
+    //         sin(local_pos.psi), cos(local_pos.psi), 0,
+    //         0, 0, 1;
+    // v_body = R_ib.inverse() * v_inertial;
 }
 
 // read trajectory data
@@ -219,9 +225,9 @@ void WAMV_MPC::solve()
     acados_in.x0[x] = local_pos.x;
     acados_in.x0[y] = local_pos.y;
     acados_in.x0[psi] = yaw_sum;
-    acados_in.x0[u] = v_body[0];
-    acados_in.x0[v] = v_body[1];
-    acados_in.x0[r] = v_body[2];
+    acados_in.x0[u] = local_pos.u;
+    acados_in.x0[v] = local_pos.v;
+    acados_in.x0[r] = local_pos.r;
     ocp_nlp_constraints_model_set(mpc_capsule->nlp_config,mpc_capsule->nlp_dims,mpc_capsule->nlp_in, 0, "lbx", acados_in.x0);
     ocp_nlp_constraints_model_set(mpc_capsule->nlp_config,mpc_capsule->nlp_dims,mpc_capsule->nlp_in, 0, "ubx", acados_in.x0);
 
@@ -256,8 +262,8 @@ void WAMV_MPC::solve()
 
     ocp_nlp_out_get(mpc_capsule->nlp_config, mpc_capsule->nlp_dims, mpc_capsule->nlp_out, 0, "u", (void *)acados_out.u0);
 
-    // publish_cin(acados_out.u0[0], acados_out.u0[1], acados_out.u0[2], acados_out.u0[3]);
-    publish_cin(10,10,0,0);
+    publish_cin(acados_out.u0[0], acados_out.u0[1], acados_out.u0[2], acados_out.u0[3]);
+    // publish_cin(10,10,0,0);
 
 
     if(cout_counter > 2){
@@ -270,7 +276,7 @@ void WAMV_MPC::solve()
         std::cout << "vel_p:  " << local_pos.p << "  vel_q:  " << local_pos.q << "  vel_r:  " << local_pos.r << std::endl;
         std::cout << "Tp:  " << acados_out.u0[0] << "  Ts:  " << acados_out.u0[1] << "  delta_p:  " << acados_out.u0[2] << "  delta_s:  " << acados_out.u0[3] << std::endl;
         std::cout << "Tp_cmd  " << Tp.data << "  Ts_cmd:  " << Ts.data << std::endl;
-        // std::cout << "solve_time: "<< acados_out.cpu_time << "\tkkt_res: " << acados_out.kkt_res << "\tacados_status: " << acados_out.status << std::endl;
+        std::cout << "solve_time: "<< acados_out.cpu_time << "\tkkt_res: " << acados_out.kkt_res << "\tacados_status: " << acados_out.status << std::endl;
         // std::cout << "ros_time:   " << std::fixed << ros::Time::now().toSec() << std::endl;
         std::cout << "ros_time:   " << std::fixed << rclcpp::Clock(RCL_SYSTEM_TIME).now().seconds() << std::endl;
 
