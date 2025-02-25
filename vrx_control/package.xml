@@ -26,5 +26,9 @@
 
   <export>
     <build_type>ament_cmake</build_type>
+    <launch>
+      <launch_file>mpc.launch.py</launch_file>
+      <launch_file>start_mpc.launch.py</launch_file>
+    </launch>
   </export>
 </package>

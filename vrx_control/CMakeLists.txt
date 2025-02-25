@@ -76,7 +76,7 @@ target_link_libraries(wamv_mpc_node
 )
 
 install(TARGETS wamv_mpc_node
-  DESTINATION lib/${vrx_control}
+  DESTINATION lib/${PROJECT_NAME}
 )
 
 if(BUILD_TESTING)
@@ -90,5 +90,13 @@ if(BUILD_TESTING)
   set(ament_cmake_cpplint_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
 endif()
+
+# Install launch files
+install(DIRECTORY launch
+  DESTINATION share/${PROJECT_NAME}
+)
+install(DIRECTORY config
+  DESTINATION share/${PROJECT_NAME}
+)
 
 ament_package()
