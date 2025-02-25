@@ -52,8 +52,8 @@ def main():
     
 
     # set constraints
-    u_min = np.array([-100, -100, -1.57, -1.57])
-    u_max = np.array([242, 242, 1.57, 1.57])
+    u_min = np.array([0, 0, -3.14, -3.14])
+    u_max = np.array([2353, 2353, 3.14, 3.14])
     ocp.constraints.lbu = u_min
     ocp.constraints.ubu = u_max
     ocp.constraints.idxbu = np.array([0,1,2,3])         # indices of bounds on u

@@ -102,8 +102,15 @@ class WAMV_MPC : public rclcpp::Node
     Matrix<double,3,3> R_ib;            // rotation matrix for linear from inertial to body frame
     Matrix<double,3,1> v_body;      // velocity u, v, r in body frame
     Matrix<double,3,1> v_inertial;  // velocity u, v, r in inertial frame
-    double Tp_cmd;
-    double Ts_cmd;
+
+    std_msgs::msg::Float64 Tp;
+    std_msgs::msg::Float64 Ts;
+    std_msgs::msg::Float64 delta_p;
+    std_msgs::msg::Float64 delta_s;
+
+    geometry_msgs::msg::TwistStamped control_inputs;
+    nav_msgs::msg::Odometry ref_pose;
+    nav_msgs::msg::Odometry error_pose;
 
     // Time
     rclcpp::Time current_time;
@@ -120,7 +127,6 @@ class WAMV_MPC : public rclcpp::Node
     
     rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr ref_pose_pub;
     rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr error_pose_pub;
-    rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr pose_gt_pub;
 
     // Trajectory variables
     std::vector<std::vector<double>> trajectory;
@@ -144,11 +150,10 @@ class WAMV_MPC : public rclcpp::Node
     WAMV_MPC();                        // constructor
     // void states_cb(const gazebo_msgs::ModelStates::ConstPtr& msg);  // subscribe pos and vel
     void states_cb(const nav_msgs::msg::Odometry::SharedPtr msg);
-    // int readDataFromFile(const char* fileName, std::vector<std::vector<double>> &data);     // read trajectory
-    // void ref_cb(int line_to_read);
+    int readDataFromFile(const char* fileName, std::vector<std::vector<double>> &data);     // read trajectory
+    void ref_cb(int line_to_read);
     void solve();                                           // solve MPC
-    // void publish_cin(double Tp, double Ts, double delta_p, double delta_s);
-    // double thrustToCmd(double glf_T, double glf_A, double glf_K, double glf_B, double glf_v, double glf_C, double glf_M);
+    void publish_cin(double Tp_mpc, double Ts_mpc, double delta_p_mpc, double delta_s_mpc);
 };
 
 #endif

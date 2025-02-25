@@ -70,17 +70,12 @@ def export_wamv_model() -> AcadosModel:
     added_mass = np.array([0,0,0,0,0,0])
     M = np.diag([m+added_mass[0], m+added_mass[1], Izz+added_mass[5]]) # M_RB + M_A
     M_inv = np.linalg.inv(M)
-    xu = 51.3
-    xuu = 72.4
-    yv = 40
-    yvv = 0
-    nr = 400
-    nrr = 0
-    
-    # # glf function: cmd to thrust
-    # glf_v = fmax(glf_v, 1e-3)
-    # Tp = glf_A + (glf_K-glf_A)/(glf_C + exp(-glf_B * (Tp_cmd - glf_M)))**(1/glf_v)
-    # Ts = glf_A + (glf_K-glf_A)/(glf_C + exp(-glf_B * (Ts_cmd - glf_M)))**(1/glf_v)
+    xu = 100
+    xuu = 150
+    yv = 100
+    yvv = 100
+    nr = 800
+    nrr = 800
 
     # thrust allocation
     Tx = Tp*cos(delta_p) + Ts*cos(delta_s)
