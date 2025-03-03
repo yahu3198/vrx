@@ -1,103 +1,84 @@
 from acados_template import AcadosOcp, AcadosOcpSolver
 from wamv import export_wamv_model
 import numpy as np
-import casadi
-#from utils import plot_pendulum
-import math
 from scipy.linalg import block_diag
 
 def main():
-    # create ocp object to formulate the OCP
     ocp = AcadosOcp()
-
-    # set model
     model = export_wamv_model()
     ocp.model = model
 
     Tf = 1.0
-    
-    nx = model.x.size()[0]
-    nu = model.u.size()[0]
-    ny = nx + nu                 # y is x and u concatenated for compactness of the loss function
-    # nparam = model.p.size()[0]
-
+    nx = model.x.size()[0]  # 6
+    nu = model.u.size()[0]  # 4
+    nz = model.z.size()[0]  # 4
+    ny = nx + nu + nz       # 14
     N = 60
 
-    # set dimensions
-    ocp.dims.N = N
+    ocp.solver_options.N_horizon = N
+    ocp.dims.nz = nz
 
-    # set parameters (new added)
-    # ocp.parameter_values = np.zeros((nparam, ))
-    
-    # set cost
-    W_x = np.diag([250, 250, 250, 10, 10, 1])    #Q_mat
-    W_u = np.diag([0.1, 0.1, 100, 100])                           #R_mat
-    W = block_diag(W_x, W_u)
-    ocp.cost.W_e = W_x
+    # Cost
+    W_x = np.diag([500, 500, 500, 50, 50, 50])     # x,y,psi,u,v,r
+    W_u = np.diag([1, 1, 700, 700])             # Tp,Ts,delta_p,delta_s
+    W_du = np.diag([1, 1, 100, 100])            # delta_u
+    W = block_diag(W_x, W_u, W_du)
     ocp.cost.W = W
+    ocp.cost.W_e = W_x
 
-    # the 'EXTERNAL' cost type can be used to define general cost terms
-    # NOTE: This leads to additional (exact) hessian contributions when using GAUSS_NEWTON hessian.
-    ocp.cost.cost_type = 'NONLINEAR_LS'                 # weights times states (nonlinear relationship)
-    ocp.cost.cost_type_e = 'NONLINEAR_LS'               # end states cost
-    #ocp.model.cost_expr_ext_cost = model.x.T @ W_x @ model.x + model.u.T @ W_u @ model.u
-    #ocp.model.cost_expr_ext_cost_e = model.x.T @ W_x @ model.x
-    
-    # Optimization costs
-    ocp.cost.Vx = np.zeros((ny,nx))                     # raise dim of x to the dim of y
-    ocp.cost.Vx[:nx,:nx] = np.eye(nx)                   # weight only x
-    ocp.cost.Vx_e = np.eye(nx)                          # end x cost
-    ocp.cost.Vu = np.zeros((ny,nu))                     # raise the dim of u to the dim of y
-    ocp.cost.Vu[-nu:,-nu:] = np.eye(nu)                 # weight only u
-    
+    ocp.cost.cost_type = 'NONLINEAR_LS'
+    ocp.cost.cost_type_e = 'NONLINEAR_LS'
+    ocp.cost.Vx = np.zeros((ny, nx))
+    ocp.cost.Vx[:nx, :nx] = np.eye(nx)
+    ocp.cost.Vu = np.zeros((ny, nu))
+    ocp.cost.Vu[nx:nx+nu, :] = np.eye(nu)
+    ocp.cost.Vz = np.zeros((ny, nz))
+    ocp.cost.Vz[nx+nu:, :] = np.eye(nz)
+    ocp.cost.Vx_e = np.eye(nx)
 
-    # set constraints
+    # Constraints
     u_min = np.array([0, 0, -3.14, -3.14])
     u_max = np.array([2353, 2353, 3.14, 3.14])
     ocp.constraints.lbu = u_min
     ocp.constraints.ubu = u_max
-    ocp.constraints.idxbu = np.array([0,1,2,3])         # indices of bounds on u
+    ocp.constraints.idxbu = np.array([0, 1, 2, 3])
+    ocp.constraints.x0 = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 
-    ocp.constraints.x0 = np.array([0.0, 0.0, 0, 0.0, 0.0, 0.0])
+    # Slack bounds
+    ocp.constraints.lbz = -1e8 * np.ones(nz)
+    ocp.constraints.ubz = 1e8 * np.ones(nz)
+    ocp.constraints.idxbz = np.array([0, 1, 2, 3])
 
-    # reference trajectory (will be overwritten later)
+    # Reference
     x_ref = np.zeros(nx)
-    ocp.cost.yref = np.concatenate((x_ref, np.array([0.0, 0.0, 0.0, 0.0])))
+    u_ref = np.zeros(nu)
+    z_ref = np.zeros(nz)
+    ocp.cost.yref = np.concatenate((x_ref, u_ref, z_ref))
     ocp.cost.yref_e = x_ref
 
-    # set options
-    ocp.solver_options.qp_solver = 'FULL_CONDENSING_HPIPM' # FULL_CONDENSING_QPOASES
-    # PARTIAL_CONDENSING_HPIPM, FULL_CONDENSING_QPOASES, FULL_CONDENSING_HPIPM,
-    # PARTIAL_CONDENSING_QPDUNES, PARTIAL_CONDENSING_OSQP, FULL_CONDENSING_DAQP
-    ocp.solver_options.hessian_approx = 'GAUSS_NEWTON' # 'GAUSS_NEWTON', 'EXACT'
-    ocp.solver_options.integrator_type = 'ERK'
-    #ocp.solver_options.qp_solver_cond_N = 5
+    # Solver options
+    ocp.solver_options.qp_solver = 'FULL_CONDENSING_HPIPM'
+    ocp.solver_options.hessian_approx = 'GAUSS_NEWTON'
+    ocp.solver_options.integrator_type = 'IRK'  # For DAEs
     ocp.solver_options.print_level = 0
-    ocp.solver_options.nlp_solver_type = 'SQP_RTI' # SQP_RTI, SQP
-
-
-    # set prediction horizon
+    ocp.solver_options.nlp_solver_type = 'SQP_RTI'
     ocp.solver_options.tf = Tf
 
-    ocp_solver = AcadosOcpSolver(ocp, json_file = 'acados_ocp.json')
+    ocp_solver = AcadosOcpSolver(ocp, json_file='acados_ocp.json')
 
     simX = np.ndarray((N+1, nx))
     simU = np.ndarray((N, nu))
 
     status = ocp_solver.solve()
-    ocp_solver.print_statistics() # encapsulates: stat = ocp_solver.get_stats("statistics")
+    ocp_solver.print_statistics()
 
     if status != 0:
         raise Exception(f'acados returned status {status}.')
 
-    # get solution
     for i in range(N):
-        simX[i,:] = ocp_solver.get(i, "x")
-        simU[i,:] = ocp_solver.get(i, "u")
-    simX[N,:] = ocp_solver.get(N, "x")
-
-    #plot_pendulum(np.linspace(0, Tf, N+1), Fmax, simU, simX, latexify=False)
-
+        simX[i, :] = ocp_solver.get(i, "x")
+        simU[i, :] = ocp_solver.get(i, "u")
+    simX[N, :] = ocp_solver.get(N, "x")
 
 if __name__ == '__main__':
     main()

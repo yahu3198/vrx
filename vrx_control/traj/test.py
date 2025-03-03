@@ -8,14 +8,12 @@ import math
 # Parameters
 sample_time = 0.05             
 duration = 200                   # seconds
-max_forward_speed = 1.5
 
-v = 1
+v = 0.5
 
 r = 1.5
 x0 = 0
 y0 = 0
-z0 = -20
 
 # trajectory
 traj = np.zeros((int(duration/sample_time+1),10)) # x y z phi theta psi u v w p q r u1 u2 u3 u4
@@ -52,6 +50,7 @@ for i in range(0,int(duration/sample_time+1)):
     # if i > 200:
     #     traj[i,0] = 0
     traj[i,0] = v*i*sample_time
+    traj[i,3] = v
     # traj[i,2] = -0.2*v*i*sample_time
 
 # for i in range(0,int(duration/sample_time+1)):

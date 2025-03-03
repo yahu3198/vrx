@@ -55,13 +55,13 @@ extern "C" {
 
 static const casadi_int casadi_s0[10] = {6, 1, 0, 6, 0, 1, 2, 3, 4, 5};
 static const casadi_int casadi_s1[8] = {4, 1, 0, 4, 0, 1, 2, 3};
-static const casadi_int casadi_s2[4] = {0, 1, 0, 0};
-static const casadi_int casadi_s3[3] = {0, 0, 0};
-static const casadi_int casadi_s4[14] = {10, 1, 0, 10, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
-static const casadi_int casadi_s5[23] = {10, 10, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3};
-static const casadi_int casadi_s6[3] = {10, 0, 0};
+static const casadi_int casadi_s2[3] = {0, 0, 0};
+static const casadi_int casadi_s3[4] = {0, 1, 0, 0};
+static const casadi_int casadi_s4[18] = {14, 1, 0, 14, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13};
+static const casadi_int casadi_s5[27] = {10, 14, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 10, 10, 10, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3};
+static const casadi_int casadi_s6[11] = {14, 4, 0, 1, 2, 3, 4, 10, 11, 12, 13};
 
-/* wamv_cost_y_fun_jac_ut_xt:(i0[6],i1[4],i2[0],i3[],i4[0])->(o0[10],o1[10x10,10nz],o2[10x0]) */
+/* wamv_cost_y_fun_jac_ut_xt:(i0[6],i1[4],i2[4],i3[],i4[0])->(o0[14],o1[10x14,10nz],o2[14x4,4nz]) */
 static int casadi_f0(const casadi_real** arg, casadi_real** res, casadi_int* iw, casadi_real* w, int mem) {
   casadi_real a0;
   a0=arg[0]? arg[0][0] : 0;
@@ -84,6 +84,14 @@ static int casadi_f0(const casadi_real** arg, casadi_real** res, casadi_int* iw,
   if (res[0]!=0) res[0][8]=a0;
   a0=arg[1]? arg[1][3] : 0;
   if (res[0]!=0) res[0][9]=a0;
+  a0=arg[2]? arg[2][0] : 0;
+  if (res[0]!=0) res[0][10]=a0;
+  a0=arg[2]? arg[2][1] : 0;
+  if (res[0]!=0) res[0][11]=a0;
+  a0=arg[2]? arg[2][2] : 0;
+  if (res[0]!=0) res[0][12]=a0;
+  a0=arg[2]? arg[2][3] : 0;
+  if (res[0]!=0) res[0][13]=a0;
   a0=1.;
   if (res[1]!=0) res[1][0]=a0;
   if (res[1]!=0) res[1][1]=a0;
@@ -95,6 +103,10 @@ static int casadi_f0(const casadi_real** arg, casadi_real** res, casadi_int* iw,
   if (res[1]!=0) res[1][7]=a0;
   if (res[1]!=0) res[1][8]=a0;
   if (res[1]!=0) res[1][9]=a0;
+  if (res[2]!=0) res[2][0]=a0;
+  if (res[2]!=0) res[2][1]=a0;
+  if (res[2]!=0) res[2][2]=a0;
+  if (res[2]!=0) res[2][3]=a0;
   return 0;
 }
 
@@ -160,9 +172,9 @@ CASADI_SYMBOL_EXPORT const casadi_int* wamv_cost_y_fun_jac_ut_xt_sparsity_in(cas
   switch (i) {
     case 0: return casadi_s0;
     case 1: return casadi_s1;
-    case 2: return casadi_s2;
-    case 3: return casadi_s3;
-    case 4: return casadi_s2;
+    case 2: return casadi_s1;
+    case 3: return casadi_s2;
+    case 4: return casadi_s3;
     default: return 0;
   }
 }
