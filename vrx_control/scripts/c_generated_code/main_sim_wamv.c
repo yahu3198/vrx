@@ -87,6 +87,15 @@ int main()
     u0[1] = 0.0;
     u0[2] = 0.0;
     u0[3] = 0.0;
+    // set parameters
+    double p[NP];
+    p[0] = 0;
+    p[1] = 0;
+    p[2] = 0;
+    p[3] = 0;
+
+    wamv_acados_sim_update_params(capsule, p, NP);
+  
 
   
 

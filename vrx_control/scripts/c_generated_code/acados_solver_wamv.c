@@ -385,7 +385,14 @@ void wamv_acados_create_setup_functions(wamv_solver_capsule* capsule)
 void wamv_acados_create_set_default_parameters(wamv_solver_capsule* capsule)
 {
 
-    // no parameters defined
+    const int N = capsule->nlp_solver_plan->N;
+    // initialize parameters to nominal value
+    double* p = calloc(NP, sizeof(double));
+
+    for (int i = 0; i <= N; i++) {
+        wamv_acados_update_params(capsule, i, p, NP);
+    }
+    free(p);
 
 
     // no global parameters defined
@@ -514,10 +521,10 @@ void wamv_acados_setup_nlp_in(wamv_solver_capsule* capsule, const int N, double*
 
    double* W_0 = calloc(NY0*NY0, sizeof(double));
     // change only the non-zero elements:
-    W_0[0+(NY0) * 0] = 500;
-    W_0[1+(NY0) * 1] = 500;
-    W_0[2+(NY0) * 2] = 500;
-    W_0[3+(NY0) * 3] = 50;
+    W_0[0+(NY0) * 0] = 800;
+    W_0[1+(NY0) * 1] = 200;
+    W_0[2+(NY0) * 2] = 200;
+    W_0[3+(NY0) * 3] = 200;
     W_0[4+(NY0) * 4] = 50;
     W_0[5+(NY0) * 5] = 50;
     W_0[6+(NY0) * 6] = 1;
@@ -526,8 +533,8 @@ void wamv_acados_setup_nlp_in(wamv_solver_capsule* capsule, const int N, double*
     W_0[9+(NY0) * 9] = 700;
     W_0[10+(NY0) * 10] = 1;
     W_0[11+(NY0) * 11] = 1;
-    W_0[12+(NY0) * 12] = 100;
-    W_0[13+(NY0) * 13] = 100;
+    W_0[12+(NY0) * 12] = 1;
+    W_0[13+(NY0) * 13] = 1;
     ocp_nlp_cost_model_set(nlp_config, nlp_dims, nlp_in, 0, "W", W_0);
     free(W_0);
     double* yref = calloc(NY, sizeof(double));
@@ -540,10 +547,10 @@ void wamv_acados_setup_nlp_in(wamv_solver_capsule* capsule, const int N, double*
     free(yref);
     double* W = calloc(NY*NY, sizeof(double));
     // change only the non-zero elements:
-    W[0+(NY) * 0] = 500;
-    W[1+(NY) * 1] = 500;
-    W[2+(NY) * 2] = 500;
-    W[3+(NY) * 3] = 50;
+    W[0+(NY) * 0] = 800;
+    W[1+(NY) * 1] = 200;
+    W[2+(NY) * 2] = 200;
+    W[3+(NY) * 3] = 200;
     W[4+(NY) * 4] = 50;
     W[5+(NY) * 5] = 50;
     W[6+(NY) * 6] = 1;
@@ -552,8 +559,8 @@ void wamv_acados_setup_nlp_in(wamv_solver_capsule* capsule, const int N, double*
     W[9+(NY) * 9] = 700;
     W[10+(NY) * 10] = 1;
     W[11+(NY) * 11] = 1;
-    W[12+(NY) * 12] = 100;
-    W[13+(NY) * 13] = 100;
+    W[12+(NY) * 12] = 1;
+    W[13+(NY) * 13] = 1;
 
     for (int i = 1; i < N; i++)
     {
@@ -567,10 +574,10 @@ void wamv_acados_setup_nlp_in(wamv_solver_capsule* capsule, const int N, double*
 
     double* W_e = calloc(NYN*NYN, sizeof(double));
     // change only the non-zero elements:
-    W_e[0+(NYN) * 0] = 500;
-    W_e[1+(NYN) * 1] = 500;
-    W_e[2+(NYN) * 2] = 500;
-    W_e[3+(NYN) * 3] = 50;
+    W_e[0+(NYN) * 0] = 800;
+    W_e[1+(NYN) * 1] = 200;
+    W_e[2+(NYN) * 2] = 200;
+    W_e[3+(NYN) * 3] = 200;
     W_e[4+(NYN) * 4] = 50;
     W_e[5+(NYN) * 5] = 50;
     ocp_nlp_cost_model_set(nlp_config, nlp_dims, nlp_in, N, "W", W_e);
@@ -642,10 +649,10 @@ void wamv_acados_setup_nlp_in(wamv_solver_capsule* capsule, const int N, double*
     double* ubu = lubu + NBU;
     ubu[0] = 2353;
     ubu[1] = 2353;
-    lbu[2] = -3.14;
-    ubu[2] = 3.14;
-    lbu[3] = -3.14;
-    ubu[3] = 3.14;
+    lbu[2] = -2;
+    ubu[2] = 2;
+    lbu[3] = -2;
+    ubu[3] = 2;
 
     for (int i = 0; i < N; i++)
     {
@@ -947,7 +954,7 @@ int wamv_acados_update_params(wamv_solver_capsule* capsule, int stage, double *p
 {
     int solver_status = 0;
 
-    int casadi_np = 0;
+    int casadi_np = 4;
     if (casadi_np != np) {
         printf("acados_update_params: trying to set %i parameters for external functions."
             " External function has %i parameters. Exiting.\n", np, casadi_np);

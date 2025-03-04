@@ -168,6 +168,13 @@ int wamv_acados_sim_create(wamv_sim_solver_capsule * capsule)
     capsule->acados_sim_solver = wamv_sim_solver;
 
 
+    /* initialize parameter values */
+    double* p = calloc(np, sizeof(double));
+    
+
+    wamv_acados_sim_update_params(capsule, p, np);
+    free(p);
+
 
     /* initialize input */
     // x

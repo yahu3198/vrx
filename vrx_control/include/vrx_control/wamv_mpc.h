@@ -80,12 +80,19 @@ class WAMV_MPC : public rclcpp::Node
         double r;
     };
 
+    struct SolverParam{
+        double Tp_pre;
+        double Ts_pre;
+        double delta_p_pre;
+        double delta_s_pre;
+    };
+
     LocalPos local_pos;
 
     // Acados variables
     SolverInput acados_in;
     SolverOutput acados_out;
-    // double acados_param[WAMV_N+1][WAMV_NP];  // disturbances
+    double acados_param[WAMV_N+1][WAMV_NP];  // disturbances
     int acados_status;   
     wamv_solver_capsule * mpc_capsule = wamv_acados_create_capsule();
     
@@ -96,7 +103,7 @@ class WAMV_MPC : public rclcpp::Node
     std::string WRENCH_TZ;
     int READ_WRENCH;        // 0: periodic disturbance; 1: random disturbance; 2: read wrench from text
     bool COMPENSATE_D;       // 0: no compensate; 1: compensate
-    // SolverParam solver_param;
+    SolverParam solver_param;
 
     // dynamics parameters
     Matrix<double,3,3> R_ib;            // rotation matrix for linear from inertial to body frame
@@ -136,6 +143,7 @@ class WAMV_MPC : public rclcpp::Node
     // Other variables
     tf2::Quaternion tf_quaternion;
     int cout_counter = 0;
+    double start_time;
 
     float yaw_sum = 0;      // yaw degree as continous number
     float pre_yaw = 0;      // former state yaw degree

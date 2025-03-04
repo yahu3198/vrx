@@ -7,11 +7,19 @@ WAMV_MPC::WAMV_MPC()
     this->declare_parameter<int>("read_wrench", 0);
     this->declare_parameter<bool>("compensate_d", false);
     this->declare_parameter<std::string>("ref_traj", "");
+    // this->declare_parameter<double>("Tp_pre", 0.0);
+    // this->declare_parameter<double>("Ts_pre", 0.0);
+    // this->declare_parameter<double>("delta_p_pre", 0.0);
+    // this->declare_parameter<double>("delta_s_pre", 0.0);
 
     // Get parameters
     this->get_parameter("read_wrench", READ_WRENCH);
     this->get_parameter("compensate_d", COMPENSATE_D);
     this->get_parameter("ref_traj", REF_TRAJ);
+    // this->get_parameter("Tp_pre", solver_param.Tp_pre);
+    // this->get_parameter("Ts_pre", solver_param.Ts_pre);
+    // this->get_parameter("delta_p_pre", solver_param.delta_p_pre);
+    // this->get_parameter("delta_s_pre", solver_param.delta_s_pre);
     
     // Pre-load the trajectory
     // REF_TRAJ = "/home/yang/usv_ws/src/vrx/vrx_control/traj/stationary.txt";
@@ -59,7 +67,12 @@ WAMV_MPC::WAMV_MPC()
     // initialize
     for(unsigned int i=0; i < WAMV_NU; i++) acados_out.u0[i] = 0.0;
     for(unsigned int i=0; i < WAMV_NX; i++) acados_in.x0[i] = 0.0;
+    start_time = rclcpp::Clock(RCL_SYSTEM_TIME).now().seconds();
     is_start = false;
+    solver_param.Tp_pre = 0;
+    solver_param.Ts_pre = 0;
+    solver_param.delta_p_pre = 0;
+    solver_param.delta_s_pre = 0;
 }
 
 // subscribe pos and vel
@@ -231,6 +244,16 @@ void WAMV_MPC::solve()
     ocp_nlp_constraints_model_set(mpc_capsule->nlp_config,mpc_capsule->nlp_dims,mpc_capsule->nlp_in, 0, "lbx", acados_in.x0);
     ocp_nlp_constraints_model_set(mpc_capsule->nlp_config,mpc_capsule->nlp_dims,mpc_capsule->nlp_in, 0, "ubx", acados_in.x0);
 
+    // set parameters
+    double u_prev[4] = {solver_param.Tp_pre, solver_param.Ts_pre, solver_param.delta_p_pre, solver_param.delta_s_pre};
+    for (int i = 0; i <= WAMV_N; i++) {
+        acados_param[i][0] = u_prev[0];  // Tp_prev
+        acados_param[i][1] = u_prev[1];  // Ts_prev
+        acados_param[i][2] = u_prev[2];  // delta_p_prev
+        acados_param[i][3] = u_prev[3];  // delta_s_prev
+        wamv_acados_update_params(mpc_capsule, i, acados_param[i], WAMV_NP);
+    }
+
     // change into form of (-pi, pi)
     if(sin(acados_in.yref[0][2]) >= 0)
     {
@@ -263,9 +286,15 @@ void WAMV_MPC::solve()
     ocp_nlp_out_get(mpc_capsule->nlp_config, mpc_capsule->nlp_dims, mpc_capsule->nlp_out, 0, "u", (void *)acados_out.u0);
 
     publish_cin(acados_out.u0[0], acados_out.u0[1], acados_out.u0[2], acados_out.u0[3]);
-    // publish_cin(10,10,0,0);
+    
+    solver_param.Tp_pre = acados_out.u0[0];
+    solver_param.Ts_pre = acados_out.u0[1];
+    solver_param.delta_p_pre = acados_out.u0[2];
+    solver_param.delta_s_pre = acados_out.u0[3];
 
-
+    double current_time = rclcpp::Clock(RCL_SYSTEM_TIME).now().seconds();
+    double z[4];
+        ocp_nlp_out_get(mpc_capsule->nlp_config, mpc_capsule->nlp_dims, mpc_capsule->nlp_out, 0, "z", z);
     if(cout_counter > 2){
         std::cout << "---------------------------------------------------------------------------------------------------------------------" << std::endl;
         std::cout << "ref_x:    " << acados_in.yref[0][0] << "\tref_y:   " << acados_in.yref[0][1] << "\tref_yaw:    " << acados_in.yref[0][2] << std::endl;
@@ -275,13 +304,15 @@ void WAMV_MPC::solve()
         std::cout << "vel_x:  " << local_pos.u << "  vel_y:  " << local_pos.v << "  vel_z:  " << local_pos.w << std::endl;
         std::cout << "vel_p:  " << local_pos.p << "  vel_q:  " << local_pos.q << "  vel_r:  " << local_pos.r << std::endl;
         std::cout << "Tp:  " << acados_out.u0[0] << "  Ts:  " << acados_out.u0[1] << "  delta_p:  " << acados_out.u0[2] << "  delta_s:  " << acados_out.u0[3] << std::endl;
-        std::cout << "Tp_cmd  " << Tp.data << "  Ts_cmd:  " << Ts.data << std::endl;
+        // std::cout << "Tp_cmd  " << Tp.data << "  Ts_cmd:  " << Ts.data << std::endl;
+        std::cout << "z:    " << z << std::endl;
         std::cout << "solve_time: "<< acados_out.cpu_time << "\tkkt_res: " << acados_out.kkt_res << "\tacados_status: " << acados_out.status << std::endl;
-        // std::cout << "ros_time:   " << std::fixed << ros::Time::now().toSec() << std::endl;
-        std::cout << "ros_time:   " << std::fixed << rclcpp::Clock(RCL_SYSTEM_TIME).now().seconds() << std::endl;
-
+        std::cout << "relative_time: " << std::fixed << (current_time - start_time) << std::endl;
         std::cout << "---------------------------------------------------------------------------------------------------------------------" << std::endl;
         cout_counter = 0;
+        // double z[4];
+        // ocp_nlp_out_get(mpc_capsule->nlp_config, mpc_capsule->nlp_dims, mpc_capsule->nlp_out, 0, "z", z);
+        // RCLCPP_INFO(this->get_logger(), "z: [%f, %f, %f, %f]", z[0], z[1], z[2], z[3]);
     }
     else{
         cout_counter++;

@@ -31,8 +31,20 @@ def export_wamv_model() -> AcadosModel:
     r_dot = SX.sym('r_dot')
     sym_xdot = vertcat(x_dot, y_dot, psi_dot, u_dot, v_dot, r_dot)  # Size 6
 
-    # Slack variables
-    sym_z = SX.sym('z', 4)  # Slack for Δu
+    # parameters (new added)
+    Tp_pre = SX.sym('Tp_pre')
+    Ts_pre = SX.sym('Ts_pre')
+    delta_p_pre = SX.sym('delta_p_pre')
+    delta_s_pre = SX.sym('delta_s_pre')
+    sym_p = vertcat(Tp_pre,Ts_pre,delta_p_pre,delta_s_pre)
+
+    # Slack variables for Δu
+    Tp_z = SX.sym('Tp_z')
+    Ts_z = SX.sym('Ts_z')
+    delta_p_z = SX.sym('delta_p_z')
+    delta_s_z = SX.sym('delta_s_z')
+    sym_z = vertcat(Tp_z,Ts_z,delta_p_z,delta_s_z)
+
 
     # System parameters
     m = 180
@@ -61,7 +73,7 @@ def export_wamv_model() -> AcadosModel:
 
     f_expl = vertcat(dx, dy, dpsi, du, dv, dr)  # Size 6
     f_impl_x = sym_xdot - f_expl  # Size 6
-    f_impl_z = sym_z  # Size 4, algebraic z = 0 (enforced via cost)
+    f_impl_z = sym_z - (sym_u - sym_p)  # Size 4, algebraic z = 0 (enforced via cost)
     f_impl = vertcat(f_impl_x, f_impl_z)  # Size 10
 
     # Cost
@@ -74,6 +86,7 @@ def export_wamv_model() -> AcadosModel:
     model.xdot = sym_xdot  # Size 6
     model.u = sym_u
     model.z = sym_z
+    model.p = sym_p
     model.cost_y_expr = cost_y_expr
     model.cost_y_expr_e = sym_x
     model.name = model_name

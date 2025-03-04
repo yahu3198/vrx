@@ -13,15 +13,18 @@ def main():
     nu = model.u.size()[0]  # 4
     nz = model.z.size()[0]  # 4
     ny = nx + nu + nz       # 14
+    nparam = model.p.size()[0]
     N = 60
 
     ocp.solver_options.N_horizon = N
     ocp.dims.nz = nz
+    ocp.parameter_values = np.zeros((nparam, ))
+    ocp.dims.np = nparam
 
     # Cost
-    W_x = np.diag([500, 500, 500, 50, 50, 50])     # x,y,psi,u,v,r
-    W_u = np.diag([1, 1, 700, 700])             # Tp,Ts,delta_p,delta_s
-    W_du = np.diag([1, 1, 100, 100])            # delta_u
+    W_x = np.diag([800, 200, 200, 200, 50, 50])     # x,y,psi,u,v,r
+    W_u = np.diag([1, 1, 700, 700])             #Tp,Ts,delta_p,delta_s
+    W_du = np.diag([1, 1, 1, 1])        
     W = block_diag(W_x, W_u, W_du)
     ocp.cost.W = W
     ocp.cost.W_e = W_x
@@ -37,16 +40,16 @@ def main():
     ocp.cost.Vx_e = np.eye(nx)
 
     # Constraints
-    u_min = np.array([0, 0, -3.14, -3.14])
-    u_max = np.array([2353, 2353, 3.14, 3.14])
+    u_min = np.array([0, 0, -2, -2])
+    u_max = np.array([2353, 2353, 2, 2])
     ocp.constraints.lbu = u_min
     ocp.constraints.ubu = u_max
     ocp.constraints.idxbu = np.array([0, 1, 2, 3])
     ocp.constraints.x0 = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 
     # Slack bounds
-    ocp.constraints.lbz = -1e8 * np.ones(nz)
-    ocp.constraints.ubz = 1e8 * np.ones(nz)
+    ocp.constraints.lbz = -10 * np.ones(nz)  # Reduced range
+    ocp.constraints.ubz = 10 * np.ones(nz)
     ocp.constraints.idxbz = np.array([0, 1, 2, 3])
 
     # Reference
