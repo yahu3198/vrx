@@ -32,6 +32,7 @@ int main(int argc, char **argv)
 
         // Call solve() if the condition is met
         if (wm_node->is_start == true) {
+            wm_node->EKF();
             wm_node->solve();
         }
 

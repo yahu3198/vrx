@@ -9,7 +9,7 @@ import math
 sample_time = 0.05             
 duration = 200                   # seconds
 
-v = 0.5
+v = 0.2
 
 r = 1.5
 x0 = 0

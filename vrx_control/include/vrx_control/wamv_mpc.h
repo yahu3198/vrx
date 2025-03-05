@@ -11,6 +11,7 @@
 #include <geometry_msgs/msg/twist_stamped.hpp>
 #include <gazebo_msgs/msg/model_states.hpp>
 #include <std_msgs/msg/float64.hpp>
+#include <sensor_msgs/msg/imu.hpp>
 
 #include <iostream>
 #include <fstream>
@@ -110,6 +111,19 @@ class WAMV_MPC : public rclcpp::Node
     Matrix<double,3,1> v_body;      // velocity u, v, r in body frame
     Matrix<double,3,1> v_inertial;  // velocity u, v, r in inertial frame
 
+    double mass = 180;
+    double LCG = 2.373776;
+    double B = 2.05427;
+    double xu = 100;
+    double xuu = 150;
+    double yv = 100;
+    double yvv = 100;
+    double nr = 800;
+    double nrr = 800;
+    Matrix<double,1,3> M_values;
+    Matrix<double,3,3> M;           // mass matrix
+    Matrix<double,3,3> invM;        // inverse mass matrix
+
     std_msgs::msg::Float64 Tp;
     std_msgs::msg::Float64 Ts;
     std_msgs::msg::Float64 delta_p;
@@ -124,6 +138,7 @@ class WAMV_MPC : public rclcpp::Node
 
     // ros subscriber & publisher
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr states_sub;
+    rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub;
 
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr left_thrust_angle_pub;
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr left_thrust_cmd_pub;
@@ -139,6 +154,20 @@ class WAMV_MPC : public rclcpp::Node
     std::vector<std::vector<double>> trajectory;
     int line_number = 0;
     int number_of_steps = 0;
+
+    // EKF parameters
+    // Matrix<double,6,1> wf_disturbance; // world frame disturbance 
+    Matrix<double,4,1> meas_u;      // inputs
+    int n = 9;                     // state dimension
+    int m = 9;                     // measurement dimension
+    Matrix<double,9,1> meas_y;     // measurement vector
+    MatrixXd P0 = MatrixXd::Identity(m, m);     // initial covariance
+    Matrix<double,9,1> esti_x;     // estimate states
+    Matrix<double,9,9> esti_P;    // estimate covariance
+    Matrix<double,1,9> Q_cov;      // process noise value
+    Matrix<double,9,9> noise_Q;   // process noise matrix
+    MatrixXd noise_R = MatrixXd::Identity(m, m)*(pow(dt,4)/4); // measurement noise matrix
+    Matrix<double,3,1> tau;
 
     // Other variables
     tf2::Quaternion tf_quaternion;
@@ -156,12 +185,17 @@ class WAMV_MPC : public rclcpp::Node
     bool is_start;
 
     WAMV_MPC();                        // constructor
-    // void states_cb(const gazebo_msgs::ModelStates::ConstPtr& msg);  // subscribe pos and vel
     void states_cb(const nav_msgs::msg::Odometry::SharedPtr msg);
     int readDataFromFile(const char* fileName, std::vector<std::vector<double>> &data);     // read trajectory
     void ref_cb(int line_to_read);
     void solve();                                           // solve MPC
     void publish_cin(double Tp_mpc, double Ts_mpc, double delta_p_mpc, double delta_s_mpc);
+    void EKF();  
+    MatrixXd RK4(MatrixXd x, MatrixXd u);                                           // EKF predict and update
+    MatrixXd f(MatrixXd x, MatrixXd u);                     // system process model
+    MatrixXd h(MatrixXd x);                                 // measurement model
+    MatrixXd compute_jacobian_F(MatrixXd x, MatrixXd u);    // compute Jacobian of system process model
+    MatrixXd compute_jacobian_H(MatrixXd x);                // compute Jacobian of measurement model
 };
 
 #endif

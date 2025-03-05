@@ -1,1 +1,1 @@
-ros2 bag record -o forward0304_2 /wamv/ref_pose /wamv/error_pose /wamv/sensors/position/ground_truth_odometry /wamv/thrusters/left/pos /wamv/thrusters/left/thrust /wamv/thrusters/right/pos /wamv/thrusters/right/thrust /wamv/control_inputs
+ros2 bag record -o forward0304_5 /wamv/ref_pose /wamv/error_pose /wamv/sensors/position/ground_truth_odometry /wamv/thrusters/left/pos /wamv/thrusters/left/thrust /wamv/thrusters/right/pos /wamv/thrusters/right/thrust /wamv/control_inputs

@@ -7,19 +7,11 @@ WAMV_MPC::WAMV_MPC()
     this->declare_parameter<int>("read_wrench", 0);
     this->declare_parameter<bool>("compensate_d", false);
     this->declare_parameter<std::string>("ref_traj", "");
-    // this->declare_parameter<double>("Tp_pre", 0.0);
-    // this->declare_parameter<double>("Ts_pre", 0.0);
-    // this->declare_parameter<double>("delta_p_pre", 0.0);
-    // this->declare_parameter<double>("delta_s_pre", 0.0);
 
     // Get parameters
     this->get_parameter("read_wrench", READ_WRENCH);
     this->get_parameter("compensate_d", COMPENSATE_D);
     this->get_parameter("ref_traj", REF_TRAJ);
-    // this->get_parameter("Tp_pre", solver_param.Tp_pre);
-    // this->get_parameter("Ts_pre", solver_param.Ts_pre);
-    // this->get_parameter("delta_p_pre", solver_param.delta_p_pre);
-    // this->get_parameter("delta_s_pre", solver_param.delta_s_pre);
     
     // Pre-load the trajectory
     // REF_TRAJ = "/home/yang/usv_ws/src/vrx/vrx_control/traj/stationary.txt";
@@ -73,6 +65,17 @@ WAMV_MPC::WAMV_MPC()
     solver_param.Ts_pre = 0;
     solver_param.delta_p_pre = 0;
     solver_param.delta_s_pre = 0;
+
+    Q_cov << pow(dt,4)/4,pow(dt,4)/4,pow(dt,4)/4,pow(dt,4)/4,pow(dt,4)/4,pow(dt,4)/4,
+            pow(dt,2),pow(dt,2),pow(dt,2),pow(dt,2),pow(dt,2),pow(dt,2),
+            pow(dt,2),pow(dt,2),pow(dt,2),pow(dt,2),pow(dt,2),pow(dt,2);
+    noise_Q= Q_cov.asDiagonal();
+    
+    esti_x << 0,0,0,0,0,0,0,0,0;
+    esti_P = P0;
+    M_values << 180, 180, 446;
+    M = M_values.asDiagonal();
+    invM = M.inverse();
 }
 
 // subscribe pos and vel
@@ -305,14 +308,11 @@ void WAMV_MPC::solve()
         std::cout << "vel_p:  " << local_pos.p << "  vel_q:  " << local_pos.q << "  vel_r:  " << local_pos.r << std::endl;
         std::cout << "Tp:  " << acados_out.u0[0] << "  Ts:  " << acados_out.u0[1] << "  delta_p:  " << acados_out.u0[2] << "  delta_s:  " << acados_out.u0[3] << std::endl;
         // std::cout << "Tp_cmd  " << Tp.data << "  Ts_cmd:  " << Ts.data << std::endl;
-        std::cout << "z:    " << z << std::endl;
+        std::cout << "z:  " << "  Tp_z:  " << z[0] << "  Ts_z:  " << z[1] << "  delta_p_z:  " << z[2] << "  delta_s_z:  " << z[3] << std::endl;
         std::cout << "solve_time: "<< acados_out.cpu_time << "\tkkt_res: " << acados_out.kkt_res << "\tacados_status: " << acados_out.status << std::endl;
         std::cout << "relative_time: " << std::fixed << (current_time - start_time) << std::endl;
         std::cout << "---------------------------------------------------------------------------------------------------------------------" << std::endl;
         cout_counter = 0;
-        // double z[4];
-        // ocp_nlp_out_get(mpc_capsule->nlp_config, mpc_capsule->nlp_dims, mpc_capsule->nlp_out, 0, "z", z);
-        // RCLCPP_INFO(this->get_logger(), "z: [%f, %f, %f, %f]", z[0], z[1], z[2], z[3]);
     }
     else{
         cout_counter++;
@@ -378,4 +378,128 @@ void WAMV_MPC::publish_cin(double Tp_mpc, double Ts_mpc, double delta_p_mpc, dou
     error_pose_pub->publish(error_pose);
 
 
+}
+
+void WAMV_MPC::EKF()
+{
+    // std::cout<<"esti_x12:    " << esti_x(12) << std::endl;
+    // get input u and measuremnet y
+    meas_u << solver_param.Tp_pre, solver_param.Ts_pre, solver_param.delta_p_pre, solver_param.delta_s_pre;
+    tau << meas_u[0] * cos(meas_u[2]) + meas_u[1] * cos(meas_u[3]),
+            meas_u[0] * sin(meas_u[2]) + meas_u[1] * sin(meas_u[3]),
+            -LCG * meas_u[0] * meas_u[2] - B/2 * meas_u[0] * sin(meas_u[2]) - LCG * meas_u[1] * cos(meas_u[3]) + B/2 * meas_u[1] * sin(meas_u[3]);
+    meas_y << local_pos.x, local_pos.y, local_euler.psi,
+            local_pos.u, local_pos.v, local_pos.r,
+            tau(0),tau(1),tau(2);
+    
+    // Define Jacobian matrices of system dynamics and measurement model
+    Matrix<double,9,9> F;     // Jacobian of system dynamics
+    Matrix<double,9,9> H;     // Jacobian of measurement model
+
+    // Define Kalman gain matrix
+    Matrix<double,9,9> Kal;
+
+    // Define prediction and update steps
+    Matrix<double,9,1> x_pred;     // predicted state
+    Matrix<double,9,9> P_pred;    // predicted covariance
+    Matrix<double,9,1> y_pred;     // predicted measurement
+    Matrix<double,9,1> y_err;      // measurement error
+    
+    // Prediction step: estimate state and covariance at time k+1|k
+    F = compute_jacobian_F(esti_x, meas_u);             // compute Jacobian of system dynamics at current state and input
+    x_pred = RK4(esti_x, meas_u);                       // predict state at time k+1|k
+    // dx = f(esti_x, meas_u);                             // acceleration
+    P_pred = F * esti_P * F.transpose() + noise_Q;      // predict covariance at time k+1|k
+    
+    // Update step: correct state and covariance using measurement at time k+1
+    H = compute_jacobian_H(x_pred);                         // compute Jacobian of measurement model at predicted state
+    y_pred = h(x_pred);                                     // predict measurement at time k+1
+    y_err = meas_y - y_pred;                                // compute measurement error
+    Kal = P_pred * H.transpose() * (H * P_pred * H.transpose() + noise_R).inverse();    // compute Kalman gain
+    esti_x = x_pred + Kal * y_err;                          // correct state estimate
+    esti_P = (MatrixXd::Identity(n, n) - Kal * H) * P_pred * (MatrixXd::Identity(n, n) - Kal * H).transpose() + Kal*noise_R*Kal.transpose(); // correct covariance estimate
+}
+
+MatrixXd WAMV_MPC::RK4(MatrixXd x, MatrixXd u)
+{
+    Matrix<double,9,1> k1;
+    Matrix<double,9,1> k2;
+    Matrix<double,9,1> k3;
+    Matrix<double,9,1> k4;
+
+    k1 = f(x, u) * dt;
+    k2 = f(x+k1/2, u) * dt;
+    k3 = f(x+k2/3, u) * dt;
+    k4 = f(x+k3, u) * dt;
+
+    return x + (k1+2*k2+2*k3+k4)/6;
+}
+
+// Define system dynamics function
+MatrixXd WAMV_MPC::f(MatrixXd x, MatrixXd u)
+{
+    // Define system dynamics
+    Matrix<double,9,1> xdot;
+
+    xdot << cos(x(2))*x(3) - sin(x(2))*x(4),
+            sin(x(2))*x(3) + cos(x(2))*x(4),
+            x(5),
+            invM(0,0)*(tau(0) + mass*x(4)*x(5) + xu*x(3) + xuu*abs(x(3))*x(3)),
+            invM(1,1)*(tau(1) - mass*x(3)*x(5) + yv*x(4) + yvv*abs(x(4))*x(4)),
+            invM(2,2)*(tau(2) + nr*x(5) + nrr*abs(x(5))*x(5)),
+            0,0,0;
+            
+    
+    return xdot; // dt is the time step
+}
+
+// Define measurement model function (Z = Hx, Z: measurement vector [x,xdot,tau]; X: state vector [x,xdot,disturbance])
+MatrixXd WAMV_MPC::h(MatrixXd x)
+{
+    // Define measurement model
+    Matrix<double,18,1> y;
+    y << x(0),x(1),x(2),x(3),x(4),x(5),
+        x(6),x(7),x(8),x(9),x(10),x(11),
+        M(0,0)*body_acc.x-mass*x(11)*x(7)+mass*x(10)*x(8)+bouyancy*sin(x(4))-x(12)-Dl[0]*x(6)-Dnl[0]*abs(x(6))*x(6),        
+        M(1,1)*body_acc.y+mass*x(11)*x(6)-mass*x(9)*x(8)-bouyancy*cos(x(4))*sin(x(3))-x(13)-Dl[1]*x(7)-Dnl[1]*abs(x(7))*x(7),
+        M(2,2)*body_acc.z-mass*x(10)*x(6)+mass*x(9)*x(7)-bouyancy*cos(x(4))*cos(x(3))-x(14)-Dl[2]*x(8)-Dnl[2]*abs(x(8))*x(8),
+        M(3,3)*body_acc.phi-(Iy-Iz)*x(10)*x(11)+mass*ZG*g*cos(x(4))*sin(x(3))-x(15)-Dl[3]*x(9)-Dnl[3]*abs(x(9))*x(9),
+        M(4,4)*body_acc.theta-(Iz-Ix)*x(9)*x(11)+mass*ZG*g*sin(x(4))-x(16)-Dl[4]*x(10)-Dnl[4]*abs(x(10))*x(10),
+        M(5,5)*body_acc.psi+(Iy-Ix)*x(9)*x(10)-x(17)-Dl[5]*x(11)-Dnl[5]*abs(x(11))*x(11);
+
+    y << x(0),x(1),x(2),
+        x(3),x(4),x(5);
+    return y;
+}
+
+// Define function to compute Jacobian of system dynamics at current state and input
+MatrixXd WAMV_MPC::compute_jacobian_F(MatrixXd x, MatrixXd u)
+{
+    // Define Jacobian of system dynamics
+    Matrix<double,9,9> F;
+    double d = 1e-6;                    // finite difference step size
+    VectorXd f0 = RK4(x, u);
+    for (int i = 0; i < n; i++){
+        VectorXd x1 = x;
+        x1(i) += d;
+        VectorXd f1 = RK4(x1, u);
+        F.col(i) = (f1-f0)/d;
+    }
+    return F;
+}
+
+// Define function to compute Jacobian of measurement model at predicted state
+MatrixXd WAMV_MPC::compute_jacobian_H(MatrixXd x)
+{
+    // Define Jacobian of measurement model
+    Matrix<double,9,9> H;
+    double d = 1e-6;                    // finite difference step size
+    VectorXd f0 = h(x);
+    for (int i = 0; i < n; i++){
+        VectorXd x1 = x;
+        x1(i) += d;
+        VectorXd f1 = h(x1);
+        H.col(i) = (f1-f0)/d;
+    }
+    return H;
 }

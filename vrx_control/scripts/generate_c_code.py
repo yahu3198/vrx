@@ -22,8 +22,8 @@ def main():
     ocp.dims.np = nparam
 
     # Cost
-    W_x = np.diag([800, 200, 200, 200, 50, 50])     # x,y,psi,u,v,r
-    W_u = np.diag([1, 1, 700, 700])             #Tp,Ts,delta_p,delta_s
+    W_x = np.diag([1000, 200, 200, 200, 50, 50])     # x,y,psi,u,v,r
+    W_u = np.diag([0.5, 0.5, 800, 800])             #Tp,Ts,delta_p,delta_s
     W_du = np.diag([1, 1, 1, 1])        
     W = block_diag(W_x, W_u, W_du)
     ocp.cost.W = W
@@ -48,8 +48,10 @@ def main():
     ocp.constraints.x0 = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 
     # Slack bounds
-    ocp.constraints.lbz = -10 * np.ones(nz)  # Reduced range
-    ocp.constraints.ubz = 10 * np.ones(nz)
+    ocp.constraints.lbz = np.array([-100,-100,-0.1,-0.1])  
+    ocp.constraints.ubz = np.array([100,100,0.1,0.1])
+    # ocp.constraints.lbz = np.ones(nz)
+    # ocp.constraints.ubz = np.ones(nz)
     ocp.constraints.idxbz = np.array([0, 1, 2, 3])
 
     # Reference
