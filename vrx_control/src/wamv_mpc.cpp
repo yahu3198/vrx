@@ -66,9 +66,9 @@ WAMV_MPC::WAMV_MPC()
     solver_param.delta_p_pre = 0;
     solver_param.delta_s_pre = 0;
 
-    Q_cov << pow(dt,4)/4,pow(dt,4)/4,pow(dt,4)/4,pow(dt,4)/4,pow(dt,4)/4,pow(dt,4)/4,
-            pow(dt,2),pow(dt,2),pow(dt,2),pow(dt,2),pow(dt,2),pow(dt,2),
-            pow(dt,2),pow(dt,2),pow(dt,2),pow(dt,2),pow(dt,2),pow(dt,2);
+    Q_cov << pow(dt,4)/4,pow(dt,4)/4,pow(dt,4)/4,
+            pow(dt,2),pow(dt,2),pow(dt,2),
+            pow(dt,2),pow(dt,2),pow(dt,2);
     noise_Q= Q_cov.asDiagonal();
     
     esti_x << 0,0,0,0,0,0,0,0,0;
@@ -117,6 +117,27 @@ void WAMV_MPC::states_cb(const nav_msgs::msg::Odometry::SharedPtr msg)
     //         sin(local_pos.psi), cos(local_pos.psi), 0,
     //         0, 0, 1;
     // v_body = R_ib.inverse() * v_inertial;
+}
+
+void WAMV_MPC::imu_cb(const sensor_msgs::msg::Imu::SharedPtr msg)
+{
+    // imu angular velocity
+    imu_pos.p = msg->angular_velocity.x;
+    imu_pos.q = msg->angular_velocity.y;
+    imu_pos.r = msg->angular_velocity.z;
+    // imu linear acceleration
+    imu_acc.x = msg->linear_acceleration.x;
+    imu_acc.y = msg->linear_acceleration.y;
+    imu_acc.z = msg->linear_acceleration.z;
+    // imu orientaion
+    tf2::Quaternion tf_quaternion(
+        msg->orientation.x,
+        msg->orientation.y,
+        msg->orientation.z,
+        msg->orientation.w);
+    tf_quaternion.normalize();
+    tf2::Matrix3x3(tf_quaternion).getRPY(imu_pos.phi, imu_pos.theta, imu_pos.psi);
+
 }
 
 // read trajectory data
@@ -303,11 +324,11 @@ void WAMV_MPC::solve()
         std::cout << "ref_x:    " << acados_in.yref[0][0] << "\tref_y:   " << acados_in.yref[0][1] << "\tref_yaw:    " << acados_in.yref[0][2] << std::endl;
         std::cout << "error_x:  " << error_pose.pose.pose.position.x << "  error_y:  " << error_pose.pose.pose.position.y << "  error_psi:  " << yaw_error << std::endl;
         std::cout << "pos_x:  " << local_pos.x << "  pos_y:  " << local_pos.y << "  psi:  " << yaw_sum << std::endl;
-        std::cout << "phi:  " << local_pos.phi << "  theta:  " << local_pos.theta << "  psi:  " << local_pos.psi << std::endl;
-        std::cout << "vel_x:  " << local_pos.u << "  vel_y:  " << local_pos.v << "  vel_z:  " << local_pos.w << std::endl;
-        std::cout << "vel_p:  " << local_pos.p << "  vel_q:  " << local_pos.q << "  vel_r:  " << local_pos.r << std::endl;
+        std::cout << "ekf pos_x:  " << esti_x[0] << "  pos_y:  " << esti_x[1] << "  psi:  " << esti_x[2] << std::endl;
+        std::cout << "vel_x:  " << local_pos.u << "  vel_y:  " << local_pos.v << "  vel_r:  " << local_pos.r << std::endl;
+        std::cout << "ekf vel_x:  " << esti_x[3] << "  vel_y:  " << esti_x[4] << "  vel_r:  " << esti_x[5] << std::endl;
+        std::cout << "ekf w_x:  " << esti_x[6] << "  w_y:  " << esti_x[7] << "  w_psi:  " << esti_x[8] << std::endl;
         std::cout << "Tp:  " << acados_out.u0[0] << "  Ts:  " << acados_out.u0[1] << "  delta_p:  " << acados_out.u0[2] << "  delta_s:  " << acados_out.u0[3] << std::endl;
-        // std::cout << "Tp_cmd  " << Tp.data << "  Ts_cmd:  " << Ts.data << std::endl;
         std::cout << "z:  " << "  Tp_z:  " << z[0] << "  Ts_z:  " << z[1] << "  delta_p_z:  " << z[2] << "  delta_s_z:  " << z[3] << std::endl;
         std::cout << "solve_time: "<< acados_out.cpu_time << "\tkkt_res: " << acados_out.kkt_res << "\tacados_status: " << acados_out.status << std::endl;
         std::cout << "relative_time: " << std::fixed << (current_time - start_time) << std::endl;
@@ -384,11 +405,12 @@ void WAMV_MPC::EKF()
 {
     // std::cout<<"esti_x12:    " << esti_x(12) << std::endl;
     // get input u and measuremnet y
+    // std::cout << "test0" << std::endl;
     meas_u << solver_param.Tp_pre, solver_param.Ts_pre, solver_param.delta_p_pre, solver_param.delta_s_pre;
     tau << meas_u[0] * cos(meas_u[2]) + meas_u[1] * cos(meas_u[3]),
             meas_u[0] * sin(meas_u[2]) + meas_u[1] * sin(meas_u[3]),
             -LCG * meas_u[0] * meas_u[2] - B/2 * meas_u[0] * sin(meas_u[2]) - LCG * meas_u[1] * cos(meas_u[3]) + B/2 * meas_u[1] * sin(meas_u[3]);
-    meas_y << local_pos.x, local_pos.y, local_euler.psi,
+    meas_y << local_pos.x, local_pos.y, local_pos.psi,
             local_pos.u, local_pos.v, local_pos.r,
             tau(0),tau(1),tau(2);
     
@@ -404,13 +426,13 @@ void WAMV_MPC::EKF()
     Matrix<double,9,9> P_pred;    // predicted covariance
     Matrix<double,9,1> y_pred;     // predicted measurement
     Matrix<double,9,1> y_err;      // measurement error
-    
+    // std::cout << "test1" << std::endl;
     // Prediction step: estimate state and covariance at time k+1|k
-    F = compute_jacobian_F(esti_x, meas_u);             // compute Jacobian of system dynamics at current state and input
-    x_pred = RK4(esti_x, meas_u);                       // predict state at time k+1|k
+    F = compute_jacobian_F(esti_x, tau);             // compute Jacobian of system dynamics at current state and input
+    x_pred = RK4(esti_x, tau);                       // predict state at time k+1|k
     // dx = f(esti_x, meas_u);                             // acceleration
     P_pred = F * esti_P * F.transpose() + noise_Q;      // predict covariance at time k+1|k
-    
+    // std::cout << "test2" << std::endl;
     // Update step: correct state and covariance using measurement at time k+1
     H = compute_jacobian_H(x_pred);                         // compute Jacobian of measurement model at predicted state
     y_pred = h(x_pred);                                     // predict measurement at time k+1
@@ -418,6 +440,7 @@ void WAMV_MPC::EKF()
     Kal = P_pred * H.transpose() * (H * P_pred * H.transpose() + noise_R).inverse();    // compute Kalman gain
     esti_x = x_pred + Kal * y_err;                          // correct state estimate
     esti_P = (MatrixXd::Identity(n, n) - Kal * H) * P_pred * (MatrixXd::Identity(n, n) - Kal * H).transpose() + Kal*noise_R*Kal.transpose(); // correct covariance estimate
+    // std::cout << "test3" << std::endl;
 }
 
 MatrixXd WAMV_MPC::RK4(MatrixXd x, MatrixXd u)
@@ -444,12 +467,11 @@ MatrixXd WAMV_MPC::f(MatrixXd x, MatrixXd u)
     xdot << cos(x(2))*x(3) - sin(x(2))*x(4),
             sin(x(2))*x(3) + cos(x(2))*x(4),
             x(5),
-            invM(0,0)*(tau(0) + mass*x(4)*x(5) + xu*x(3) + xuu*abs(x(3))*x(3)),
-            invM(1,1)*(tau(1) - mass*x(3)*x(5) + yv*x(4) + yvv*abs(x(4))*x(4)),
-            invM(2,2)*(tau(2) + nr*x(5) + nrr*abs(x(5))*x(5)),
+            invM(0,0)*(u(0) + mass*x(4)*x(5) + xu*x(3) + xuu*abs(x(3))*x(3)),
+            invM(1,1)*(u(1) - mass*x(3)*x(5) + yv*x(4) + yvv*abs(x(4))*x(4)),
+            invM(2,2)*(u(2) + nr*x(5) + nrr*abs(x(5))*x(5)),
             0,0,0;
             
-    
     return xdot; // dt is the time step
 }
 
@@ -457,18 +479,14 @@ MatrixXd WAMV_MPC::f(MatrixXd x, MatrixXd u)
 MatrixXd WAMV_MPC::h(MatrixXd x)
 {
     // Define measurement model
-    Matrix<double,18,1> y;
-    y << x(0),x(1),x(2),x(3),x(4),x(5),
-        x(6),x(7),x(8),x(9),x(10),x(11),
-        M(0,0)*body_acc.x-mass*x(11)*x(7)+mass*x(10)*x(8)+bouyancy*sin(x(4))-x(12)-Dl[0]*x(6)-Dnl[0]*abs(x(6))*x(6),        
-        M(1,1)*body_acc.y+mass*x(11)*x(6)-mass*x(9)*x(8)-bouyancy*cos(x(4))*sin(x(3))-x(13)-Dl[1]*x(7)-Dnl[1]*abs(x(7))*x(7),
-        M(2,2)*body_acc.z-mass*x(10)*x(6)+mass*x(9)*x(7)-bouyancy*cos(x(4))*cos(x(3))-x(14)-Dl[2]*x(8)-Dnl[2]*abs(x(8))*x(8),
-        M(3,3)*body_acc.phi-(Iy-Iz)*x(10)*x(11)+mass*ZG*g*cos(x(4))*sin(x(3))-x(15)-Dl[3]*x(9)-Dnl[3]*abs(x(9))*x(9),
-        M(4,4)*body_acc.theta-(Iz-Ix)*x(9)*x(11)+mass*ZG*g*sin(x(4))-x(16)-Dl[4]*x(10)-Dnl[4]*abs(x(10))*x(10),
-        M(5,5)*body_acc.psi+(Iy-Ix)*x(9)*x(10)-x(17)-Dl[5]*x(11)-Dnl[5]*abs(x(11))*x(11);
+    Matrix<double,9,1> y;
 
     y << x(0),x(1),x(2),
-        x(3),x(4),x(5);
+        x(3),x(4),x(5),
+        M(0,0)*imu_acc.x - mass*x(4)*x(5) - xu*x(3) - xuu*abs(x(3))*x(3),
+        M(1,1)*imu_acc.y + mass*x(3)*x(5) - yv*x(4) - yvv*abs(x(4))*x(4),
+        M(2,2)*imu_acc.z - nr*x(5) - nrr*abs(x(5))*x(5);
+
     return y;
 }
 

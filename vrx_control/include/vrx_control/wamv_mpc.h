@@ -81,6 +81,12 @@ class WAMV_MPC : public rclcpp::Node
         double r;
     };
 
+    struct Acc{
+        double x;
+        double y;
+        double z;
+    };
+
     struct SolverParam{
         double Tp_pre;
         double Ts_pre;
@@ -89,6 +95,8 @@ class WAMV_MPC : public rclcpp::Node
     };
 
     LocalPos local_pos;
+    LocalPos imu_pos;
+    Acc imu_acc;
 
     // Acados variables
     SolverInput acados_in;
@@ -111,6 +119,7 @@ class WAMV_MPC : public rclcpp::Node
     Matrix<double,3,1> v_body;      // velocity u, v, r in body frame
     Matrix<double,3,1> v_inertial;  // velocity u, v, r in inertial frame
 
+    double dt = 0.05;
     double mass = 180;
     double LCG = 2.373776;
     double B = 2.05427;
@@ -170,7 +179,7 @@ class WAMV_MPC : public rclcpp::Node
     Matrix<double,3,1> tau;
 
     // Other variables
-    tf2::Quaternion tf_quaternion;
+    // tf2::Quaternion tf_quaternion;
     int cout_counter = 0;
     double start_time;
 
@@ -186,6 +195,7 @@ class WAMV_MPC : public rclcpp::Node
 
     WAMV_MPC();                        // constructor
     void states_cb(const nav_msgs::msg::Odometry::SharedPtr msg);
+    void imu_cb(const sensor_msgs::msg::Imu::SharedPtr msg);
     int readDataFromFile(const char* fileName, std::vector<std::vector<double>> &data);     // read trajectory
     void ref_cb(int line_to_read);
     void solve();                                           // solve MPC

@@ -29,7 +29,7 @@ find_package(nav_msgs REQUIRED)
 
 ament_export_include_directories(include)
 ament_export_libraries(vrx_control)
-ament_export_dependencies(rclcpp rclpy std_msgs geometry_msgs gazebo_msgs tf2 tf2_ros rcl_interfaces tf2_geometry_msgs)  # Add tf2_geometry_msgs here
+ament_export_dependencies(rclcpp rclpy std_msgs geometry_msgs gazebo_msgs tf2 tf2_ros rcl_interfaces tf2_geometry_msgs sensor_msgs)  # Add tf2_geometry_msgs here
 
 set(acados_include "/home/yang/acados/include")
 set(acados_lib "/home/yang/acados/lib")
@@ -39,6 +39,7 @@ include_directories(
   include
   ${rclcpp_INCLUDE_DIRS}
   ${std_msgs_INCLUDE_DIRS}
+  ${sensor_msgs_INCLUDE_DIRS}
   ${geometry_msgs_INCLUDE_DIRS}
   ${gazebo_msgs_INCLUDE_DIRS}
   ${wamv_model}
@@ -67,6 +68,7 @@ ament_target_dependencies(wamv_mpc_node
   tf2_ros
   rcl_interfaces
   nav_msgs
+  sensor_msgs
   tf2_geometry_msgs  # Add tf2_geometry_msgs as a dependency
 )
 
