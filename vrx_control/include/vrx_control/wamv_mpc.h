@@ -141,6 +141,7 @@ class WAMV_MPC : public rclcpp::Node
     geometry_msgs::msg::TwistStamped control_inputs;
     nav_msgs::msg::Odometry ref_pose;
     nav_msgs::msg::Odometry error_pose;
+    nav_msgs::msg::Odometry ekf_pose;
 
     // Time
     rclcpp::Time current_time;
@@ -158,6 +159,7 @@ class WAMV_MPC : public rclcpp::Node
     
     rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr ref_pose_pub;
     rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr error_pose_pub;
+    rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr ekf_pose_pub;
 
     // Trajectory variables
     std::vector<std::vector<double>> trajectory;

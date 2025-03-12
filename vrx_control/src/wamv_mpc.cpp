@@ -42,19 +42,21 @@ WAMV_MPC::WAMV_MPC()
         std::bind(&WAMV_MPC::states_cb, this, std::placeholders::_1));
     
     left_thrust_angle_pub = this->create_publisher<std_msgs::msg::Float64>(
-        "/wamv/thrusters/left/pos", 10);
+        "/wamv/thrusters/left/pos", 20);
     left_thrust_cmd_pub = this->create_publisher<std_msgs::msg::Float64>(
-        "/wamv/thrusters/left/thrust", 10);
+        "/wamv/thrusters/left/thrust", 20);
     right_thrust_angle_pub = this->create_publisher<std_msgs::msg::Float64>(
-        "/wamv/thrusters/right/pos", 10);
+        "/wamv/thrusters/right/pos", 20);
     right_thrust_cmd_pub = this->create_publisher<std_msgs::msg::Float64>(
-        "/wamv/thrusters/right/thrust", 10);
+        "/wamv/thrusters/right/thrust", 20);
     ref_pose_pub = this->create_publisher<nav_msgs::msg::Odometry>(
-        "/wamv/ref_pose", 10);
+        "/wamv/ref_pose", 20);
     error_pose_pub = this->create_publisher<nav_msgs::msg::Odometry>(
-        "/wamv/error_pose", 10);
+        "/wamv/error_pose", 20);
     control_inputs_pub = this->create_publisher<geometry_msgs::msg::TwistStamped>(
-            "/wamv/control_inputs", 10);
+            "/wamv/control_inputs", 20);
+    ekf_pose_pub = this->create_publisher<nav_msgs::msg::Odometry>(
+        "/wamv/ekf_pose", 20);
 
     // initialize
     for(unsigned int i=0; i < WAMV_NU; i++) acados_out.u0[i] = 0.0;
@@ -397,6 +399,23 @@ void WAMV_MPC::publish_cin(double Tp_mpc, double Ts_mpc, double delta_p_mpc, dou
     error_pose.child_frame_id = "base_link";
 
     error_pose_pub->publish(error_pose);
+
+    // publish error states
+    tf2::Quaternion quat_ekf;
+    quat_ekf.setRPY(0, 0, esti_x[2]);
+    geometry_msgs::msg::Quaternion quat_ekf_msg;
+    tf2::convert(quat_ekf, quat_ekf_msg);
+    ekf_pose.pose.pose.position.x = esti_x[0];
+    ekf_pose.pose.pose.position.y = esti_x[1];
+    ekf_pose.pose.pose.orientation.x = quat_ekf_msg.x;
+    ekf_pose.pose.pose.orientation.y = quat_ekf_msg.y;
+    ekf_pose.pose.pose.orientation.z = quat_ekf_msg.z;
+    ekf_pose.pose.pose.orientation.w = quat_ekf_msg.w;
+    ekf_pose.header.stamp = rclcpp::Clock().now();
+    ekf_pose.header.frame_id = "odom_frame";
+    ekf_pose.child_frame_id = "base_link";
+
+    ekf_pose_pub->publish(ekf_pose);
 
 
 }
