@@ -10,7 +10,10 @@ int main(int argc, char **argv)
     auto wm_node = std::make_shared<WAMV_MPC>();
 
     // Set loop rate 
-    rclcpp::Rate loop_rate(20); 
+    rclcpp::Rate loop_rate(100); 
+    // Counter to throttle solve() to 20 Hz
+    int iteration_count = 0;
+    const int solve_frequency = 5; // 100 Hz / 20 Hz = 5 iterations
 
     // Set start time and duration for the operation
     // rclcpp::Time start_time = rclcpp::Clock().now();
@@ -33,8 +36,14 @@ int main(int argc, char **argv)
         // Call solve() if the condition is met
         if (wm_node->is_start == true) {
             wm_node->EKF();
-            wm_node->solve();
+            // wm_node->solve();
+            if (iteration_count % solve_frequency == 0) {
+                wm_node->solve();
+            }
         }
+
+        // Increment counter
+        iteration_count++;
 
         // Spin the node (to process callbacks if needed)
         rclcpp::spin_some(wm_node);

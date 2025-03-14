@@ -67,11 +67,20 @@ WAMV_MPC::WAMV_MPC()
     solver_param.Ts_pre = 0;
     solver_param.delta_p_pre = 0;
     solver_param.delta_s_pre = 0;
+    // pre_pos.u = 0;
+    // pre_pos.v = 0;
+    // pre_pos.r = 0;
 
-    Q_cov << pow(dt,4)/4,pow(dt,4)/4,pow(dt,4)/4,
-            pow(dt,2),pow(dt,2),pow(dt,2),
-            pow(dt,2),pow(dt,2),pow(dt,2);
+    Q_cov << 1e-3, 1e-3, 1e-3, 
+            1e-2, 1e-2, 1e-2, 
+            0.01, 0.01, 0.001;
     noise_Q= Q_cov.asDiagonal();
+    R_cov << 1e-4, 1e-4, 1e-4, 
+            1e-3, 1e-3, 1e-3, 
+            0.1, 0.1, 0.1;
+    noise_R = R_cov.asDiagonal();
+    R_imu_cov << 1.95e-4, 1.96e-6, 7.27, 7.27;
+    noise_R_imu = R_imu_cov.asDiagonal();
     
     esti_x << 0,0,0,0,0,0,0,0,0;
     esti_P = P0;
@@ -112,34 +121,71 @@ void WAMV_MPC::states_cb(const nav_msgs::msg::Odometry::SharedPtr msg)
 
     // Extract roll, pitch, and yaw
     tf2::Matrix3x3(tf_quaternion).getRPY(local_pos.phi, local_pos.theta, local_pos.psi);
-
     // Convert velocity to body frame
     // v_inertial << local_pos.u, local_pos.v, local_pos.r;
     // R_ib << cos(local_pos.psi), -sin(local_pos.psi), 0,
     //         sin(local_pos.psi), cos(local_pos.psi), 0,
     //         0, 0, 1;
     // v_body = R_ib.inverse() * v_inertial;
+    // odom_acc = local_pos.u-
+    odom_data_available = true;
 }
 
 void WAMV_MPC::imu_cb(const sensor_msgs::msg::Imu::SharedPtr msg)
 {
-    // imu angular velocity
-    imu_pos.p = msg->angular_velocity.x;
-    imu_pos.q = msg->angular_velocity.y;
-    imu_pos.r = msg->angular_velocity.z;
-    // imu linear acceleration
-    imu_acc.x = msg->linear_acceleration.x;
-    imu_acc.y = msg->linear_acceleration.y;
-    imu_acc.z = msg->linear_acceleration.z;
-    // imu orientaion
+    // Raw IMU data
+    double p_raw = msg->angular_velocity.x;
+    double q_raw = msg->angular_velocity.y;
+    double r_raw = msg->angular_velocity.z;
+    double ax_raw = msg->linear_acceleration.x;
+    double ay_raw = msg->linear_acceleration.y;
+    double az_raw = msg->linear_acceleration.z;
+
     tf2::Quaternion tf_quaternion(
         msg->orientation.x,
         msg->orientation.y,
         msg->orientation.z,
         msg->orientation.w);
     tf_quaternion.normalize();
-    tf2::Matrix3x3(tf_quaternion).getRPY(imu_pos.phi, imu_pos.theta, imu_pos.psi);
+    double phi_raw, theta_raw, psi_raw;
+    tf2::Matrix3x3(tf_quaternion).getRPY(phi_raw, theta_raw, psi_raw);
 
+    // Initialize smoothed values on first message
+    if (first_imu) {
+        imu_filter.p_smoothed = p_raw;
+        imu_filter.q_smoothed = q_raw;
+        imu_filter.r_smoothed = r_raw;
+        imu_filter.x_smoothed = ax_raw;
+        imu_filter.y_smoothed = ay_raw;
+        imu_filter.z_smoothed = az_raw;
+        imu_filter.phi_smoothed = phi_raw;
+        imu_filter.theta_smoothed = theta_raw;
+        imu_filter.psi_smoothed = psi_raw;
+        first_imu = false;
+    } else {
+        // Apply EMA: smoothed = alpha * raw + (1 - alpha) * previous_smoothed
+        imu_filter.p_smoothed = alpha * p_raw + (1.0 - alpha) * imu_filter.p_smoothed;
+        imu_filter.q_smoothed = alpha * q_raw + (1.0 - alpha) * imu_filter.q_smoothed;
+        imu_filter.r_smoothed = alpha * r_raw + (1.0 - alpha) * imu_filter.r_smoothed;
+        imu_filter.x_smoothed = alpha * ax_raw + (1.0 - alpha) * imu_filter.x_smoothed;
+        imu_filter.y_smoothed = alpha * ay_raw + (1.0 - alpha) * imu_filter.y_smoothed;
+        imu_filter.z_smoothed = alpha * az_raw + (1.0 - alpha) * imu_filter.z_smoothed;
+        imu_filter.phi_smoothed = alpha * phi_raw + (1.0 - alpha) * imu_filter.phi_smoothed;
+        imu_filter.theta_smoothed = alpha * theta_raw + (1.0 - alpha) * imu_filter.theta_smoothed;
+        imu_filter.psi_smoothed = alpha * psi_raw + (1.0 - alpha) * imu_filter.psi_smoothed;
+    }
+    // Assign smoothed values to EKF inputs
+    imu_pos.p = imu_filter.p_smoothed;
+    imu_pos.q = imu_filter.q_smoothed;
+    imu_pos.r = imu_filter.r_smoothed;
+    imu_acc.x = imu_filter.x_smoothed;
+    imu_acc.y = imu_filter.y_smoothed;
+    imu_acc.z = imu_filter.z_smoothed;
+    imu_pos.phi = imu_filter.phi_smoothed;
+    imu_pos.theta = imu_filter.theta_smoothed;
+    imu_pos.psi = imu_filter.psi_smoothed;
+
+    imu_data_available = true;
 }
 
 // read trajectory data
@@ -400,39 +446,42 @@ void WAMV_MPC::publish_cin(double Tp_mpc, double Ts_mpc, double delta_p_mpc, dou
 
     error_pose_pub->publish(error_pose);
 
-    // publish error states
-    tf2::Quaternion quat_ekf;
-    quat_ekf.setRPY(0, 0, esti_x[2]);
-    geometry_msgs::msg::Quaternion quat_ekf_msg;
-    tf2::convert(quat_ekf, quat_ekf_msg);
-    ekf_pose.pose.pose.position.x = esti_x[0];
-    ekf_pose.pose.pose.position.y = esti_x[1];
-    ekf_pose.pose.pose.orientation.x = quat_ekf_msg.x;
-    ekf_pose.pose.pose.orientation.y = quat_ekf_msg.y;
-    ekf_pose.pose.pose.orientation.z = quat_ekf_msg.z;
-    ekf_pose.pose.pose.orientation.w = quat_ekf_msg.w;
-    ekf_pose.header.stamp = rclcpp::Clock().now();
-    ekf_pose.header.frame_id = "odom_frame";
-    ekf_pose.child_frame_id = "base_link";
+    // // publish ekf states
+    // tf2::Quaternion quat_ekf;
+    // quat_ekf.setRPY(0, 0, esti_x[2]);
+    // geometry_msgs::msg::Quaternion quat_ekf_msg;
+    // tf2::convert(quat_ekf, quat_ekf_msg);
+    // ekf_pose.pose.pose.position.x = esti_x[0];
+    // ekf_pose.pose.pose.position.y = esti_x[1];
+    // ekf_pose.pose.pose.orientation.x = quat_ekf_msg.x;
+    // ekf_pose.pose.pose.orientation.y = quat_ekf_msg.y;
+    // ekf_pose.pose.pose.orientation.z = quat_ekf_msg.z;
+    // ekf_pose.pose.pose.orientation.w = quat_ekf_msg.w;
+    // ekf_pose.twist.twist.linear.x = esti_x[3];
+    // ekf_pose.twist.twist.linear.y = esti_x[4];
+    // ekf_pose.twist.twist.angular.z = esti_x[5];
+    // ekf_pose.header.stamp = rclcpp::Clock().now();
+    // ekf_pose.header.frame_id = "odom_frame";
+    // ekf_pose.child_frame_id = "base_link";
 
-    ekf_pose_pub->publish(ekf_pose);
+    // ekf_pose_pub->publish(ekf_pose);
 
 
 }
 
 void WAMV_MPC::EKF()
 {
-    // std::cout<<"esti_x12:    " << esti_x(12) << std::endl;
+    pre_ekf_pos.u = esti_x[3];
+    pre_ekf_pos.v = esti_x[4];
+    pre_ekf_pos.r = esti_x[5];
     // get input u and measuremnet y
-    // std::cout << "test0" << std::endl;
     meas_u << solver_param.Tp_pre, solver_param.Ts_pre, solver_param.delta_p_pre, solver_param.delta_s_pre;
     tau << meas_u[0] * cos(meas_u[2]) + meas_u[1] * cos(meas_u[3]),
             meas_u[0] * sin(meas_u[2]) + meas_u[1] * sin(meas_u[3]),
             -LCG * meas_u[0] * meas_u[2] - B/2 * meas_u[0] * sin(meas_u[2]) - LCG * meas_u[1] * cos(meas_u[3]) + B/2 * meas_u[1] * sin(meas_u[3]);
-    meas_y << local_pos.x, local_pos.y, local_pos.psi,
-            local_pos.u, local_pos.v, local_pos.r,
-            tau(0),tau(1),tau(2);
-    
+    // meas_y << local_pos.x, local_pos.y, local_pos.psi,
+    //         local_pos.u, local_pos.v, local_pos.r,
+    //         tau(0),tau(1),tau(2);
     // Define Jacobian matrices of system dynamics and measurement model
     Matrix<double,9,9> F;     // Jacobian of system dynamics
     Matrix<double,9,9> H;     // Jacobian of measurement model
@@ -445,21 +494,88 @@ void WAMV_MPC::EKF()
     Matrix<double,9,9> P_pred;    // predicted covariance
     Matrix<double,9,1> y_pred;     // predicted measurement
     Matrix<double,9,1> y_err;      // measurement error
-    // std::cout << "test1" << std::endl;
+
     // Prediction step: estimate state and covariance at time k+1|k
     F = compute_jacobian_F(esti_x, tau);             // compute Jacobian of system dynamics at current state and input
     x_pred = RK4(esti_x, tau);                       // predict state at time k+1|k
-    // dx = f(esti_x, meas_u);                             // acceleration
     P_pred = F * esti_P * F.transpose() + noise_Q;      // predict covariance at time k+1|k
-    // std::cout << "test2" << std::endl;
+    
+    ekf_acc.x = (x_pred[3] - pre_ekf_pos.u)/dt;
+    ekf_acc.y = (x_pred[4] - pre_ekf_pos.v)/dt;
+    ekf_acc.psi = (x_pred[5] - pre_ekf_pos.r)/dt;
+
     // Update step: correct state and covariance using measurement at time k+1
-    H = compute_jacobian_H(x_pred);                         // compute Jacobian of measurement model at predicted state
-    y_pred = h(x_pred);                                     // predict measurement at time k+1
-    y_err = meas_y - y_pred;                                // compute measurement error
-    Kal = P_pred * H.transpose() * (H * P_pred * H.transpose() + noise_R).inverse();    // compute Kalman gain
-    esti_x = x_pred + Kal * y_err;                          // correct state estimate
-    esti_P = (MatrixXd::Identity(n, n) - Kal * H) * P_pred * (MatrixXd::Identity(n, n) - Kal * H).transpose() + Kal*noise_R*Kal.transpose(); // correct covariance estimate
-    // std::cout << "test3" << std::endl;
+    if (imu_data_available || odom_data_available) {
+        int num_measurements = (imu_data_available ? 4 : 0) + (odom_data_available ? 9 : 0);
+        VectorXd meas_y_full(num_measurements);
+        VectorXd y_pred_full(num_measurements);
+        MatrixXd H_full(num_measurements, 9);
+        MatrixXd R_full(num_measurements, num_measurements);
+
+        int idx = 0;
+        if (imu_data_available) {
+            meas_y_full.segment(idx, 4) << imu_pos.psi, imu_pos.r, imu_acc.x, imu_acc.y;
+            H_full.block(idx, 0, 4, 9) = compute_jacobian_H_imu(x_pred);
+            R_full.block(idx, idx, 4, 4) = noise_R_imu;
+            idx += 4;
+            imu_data_available = false;
+        }
+        if (odom_data_available) {
+            meas_y_full.segment(idx, 9) << local_pos.x, local_pos.y, local_pos.psi,
+                                          local_pos.u, local_pos.v, local_pos.r,
+                                          tau(0), tau(1), tau(2);
+            H_full.block(idx, 0, 9, 9) = compute_jacobian_H(x_pred);
+            R_full.block(idx, idx, 9, 9) = noise_R;
+            idx += 9;
+            odom_data_available = false;
+        }
+
+        if (num_measurements == 13) {
+            y_pred_full << h_imu(x_pred), h(x_pred);
+        } else if (num_measurements == 4) {
+            y_pred_full = h_imu(x_pred);
+        } else {
+            y_pred_full = h(x_pred);
+        }
+        y_err = meas_y_full - y_pred_full;
+            MatrixXd S = H_full * P_pred * H_full.transpose() + R_full;
+            Kal = P_pred * H_full.transpose() * S.inverse();
+            esti_x = x_pred + Kal * y_err;
+            esti_P = (MatrixXd::Identity(9, 9) - Kal * H_full) * P_pred * 
+                     (MatrixXd::Identity(9, 9) - Kal * H_full).transpose() + 
+                     Kal * R_full * Kal.transpose();
+        } else {
+            esti_x = x_pred;
+            esti_P = P_pred;
+    }
+
+    // publish ekf states
+    tf2::Quaternion quat_ekf;
+    quat_ekf.setRPY(0, 0, esti_x[2]);
+    geometry_msgs::msg::Quaternion quat_ekf_msg;
+    tf2::convert(quat_ekf, quat_ekf_msg);
+    ekf_pose.pose.pose.position.x = esti_x[0];
+    ekf_pose.pose.pose.position.y = esti_x[1];
+    ekf_pose.pose.pose.orientation.x = quat_ekf_msg.x;
+    ekf_pose.pose.pose.orientation.y = quat_ekf_msg.y;
+    ekf_pose.pose.pose.orientation.z = quat_ekf_msg.z;
+    ekf_pose.pose.pose.orientation.w = quat_ekf_msg.w;
+    ekf_pose.twist.twist.linear.x = esti_x[3];
+    ekf_pose.twist.twist.linear.y = esti_x[4];
+    ekf_pose.twist.twist.angular.z = esti_x[5];
+    ekf_pose.header.stamp = rclcpp::Clock().now();
+    ekf_pose.header.frame_id = "odom_frame";
+    ekf_pose.child_frame_id = "base_link";
+
+    ekf_pose_pub->publish(ekf_pose);
+    
+    // H = compute_jacobian_H(x_pred);                         // compute Jacobian of measurement model at predicted state
+    // y_pred = h(x_pred);                                     // predict measurement at time k+1
+    // y_err = meas_y - y_pred;                                // compute measurement error
+    // Kal = P_pred * H.transpose() * (H * P_pred * H.transpose() + noise_R).inverse();    // compute Kalman gain
+    // esti_x = x_pred + Kal * y_err;                          // correct state estimate
+    // esti_P = (MatrixXd::Identity(n, n) - Kal * H) * P_pred * (MatrixXd::Identity(n, n) - Kal * H).transpose() + Kal*noise_R*Kal.transpose(); // correct covariance estimate
+    
 }
 
 MatrixXd WAMV_MPC::RK4(MatrixXd x, MatrixXd u)
@@ -486,9 +602,9 @@ MatrixXd WAMV_MPC::f(MatrixXd x, MatrixXd u)
     xdot << cos(x(2))*x(3) - sin(x(2))*x(4),
             sin(x(2))*x(3) + cos(x(2))*x(4),
             x(5),
-            invM(0,0)*(u(0) + mass*x(4)*x(5) + xu*x(3) + xuu*abs(x(3))*x(3)),
-            invM(1,1)*(u(1) - mass*x(3)*x(5) + yv*x(4) + yvv*abs(x(4))*x(4)),
-            invM(2,2)*(u(2) + nr*x(5) + nrr*abs(x(5))*x(5)),
+            invM(0,0)*(u(0) + mass*x(4)*x(5) + xu*x(3) + xuu*abs(x(3))*x(3) + x(6)),
+            invM(1,1)*(u(1) - mass*x(3)*x(5) + yv*x(4) + yvv*abs(x(4))*x(4) + x(7)),
+            invM(2,2)*(u(2) + nr*x(5) + nrr*abs(x(5))*x(5) + x(8)),
             0,0,0;
             
     return xdot; // dt is the time step
@@ -502,10 +618,19 @@ MatrixXd WAMV_MPC::h(MatrixXd x)
 
     y << x(0),x(1),x(2),
         x(3),x(4),x(5),
-        M(0,0)*imu_acc.x - mass*x(4)*x(5) - xu*x(3) - xuu*abs(x(3))*x(3),
-        M(1,1)*imu_acc.y + mass*x(3)*x(5) - yv*x(4) - yvv*abs(x(4))*x(4),
-        M(2,2)*imu_acc.z - nr*x(5) - nrr*abs(x(5))*x(5);
+        M(0,0)*ekf_acc.x - mass*x(4)*x(5) - xu*x(3) - xuu*abs(x(3))*x(3) - x(6),
+        M(1,1)*ekf_acc.y + mass*x(3)*x(5) - yv*x(4) - yvv*abs(x(4))*x(4) - x(7),
+        M(2,2)*ekf_acc.psi - nr*x(5) - nrr*abs(x(5))*x(5) - x(8);
 
+    return y;
+}
+
+MatrixXd WAMV_MPC::h_imu(MatrixXd x) {
+    Matrix<double, 4, 1> y;
+    y << x(2),
+         x(5),
+         invM(0,0) * (tau(0) + mass * x(4) * x(5) + xu * x(3) + xuu * abs(x(3)) * x(3) + x(6)),
+         invM(1,1) * (tau(1) - mass * x(3) * x(5) + yv * x(4) + yvv * abs(x(4)) * x(4) + x(7));
     return y;
 }
 
@@ -537,6 +662,19 @@ MatrixXd WAMV_MPC::compute_jacobian_H(MatrixXd x)
         x1(i) += d;
         VectorXd f1 = h(x1);
         H.col(i) = (f1-f0)/d;
+    }
+    return H;
+}
+
+MatrixXd WAMV_MPC::compute_jacobian_H_imu(MatrixXd x) {
+    Matrix<double, 4, 9> H;
+    double d = 1e-6;
+    VectorXd f0 = h_imu(x);
+    for (int i = 0; i < 9; i++) {
+        VectorXd x1 = x;
+        x1(i) += d;
+        VectorXd f1 = h_imu(x1);
+        H.col(i) = (f1 - f0) / d;
     }
     return H;
 }

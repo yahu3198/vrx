@@ -23,11 +23,17 @@ def read_bag_data(bag_dir):
     pose_gt_y = []
     pose_gt_yaw = []
     pose_gt_time = []
+    twist_gt_x = []
+    twist_gt_y = []
+    twist_gt_psi = []
 
     ekf_pose_x = []
     ekf_pose_y = []
     ekf_pose_yaw = []
     ekf_pose_time = []
+    ekf_twist_x = []
+    ekf_twist_y = []
+    ekf_twist_psi = []
 
     left_thrust_angle = []
     right_thrust_angle = []
@@ -78,6 +84,9 @@ def read_bag_data(bag_dir):
             orientation_q = msg.pose.pose.orientation
             yaw = quat2euler([orientation_q.w, orientation_q.x, orientation_q.y, orientation_q.z])[2]
             pose_gt_yaw.append(yaw)
+            twist_gt_x.append(msg.twist.twist.linear.x)
+            twist_gt_y.append(msg.twist.twist.linear.y)
+            twist_gt_psi.append(msg.twist.twist.angular.z)
             pose_gt_time.append(timestamp_sec)
 
         elif topic == '/wamv/control_inputs':
@@ -95,18 +104,25 @@ def read_bag_data(bag_dir):
             orientation_q = msg.pose.pose.orientation
             yaw = quat2euler([orientation_q.w, orientation_q.x, orientation_q.y, orientation_q.z])[2]
             ekf_pose_yaw.append(yaw)
+            ekf_twist_x.append(msg.twist.twist.linear.x)
+            ekf_twist_y.append(msg.twist.twist.linear.y)
+            ekf_twist_psi.append(msg.twist.twist.angular.z)
             ekf_pose_time.append(timestamp_sec)
 
     return (error_pose_x, error_pose_y, error_pose_yaw, error_pose_time,
             ref_pose_x, ref_pose_y, ref_pose_yaw, ref_pose_time,
             pose_gt_x, pose_gt_y, pose_gt_yaw, pose_gt_time,
+            twist_gt_x, twist_gt_y, twist_gt_psi,
             ekf_pose_x, ekf_pose_y, ekf_pose_yaw, ekf_pose_time,
+            ekf_twist_x, ekf_twist_y, ekf_twist_psi,
             left_thrust_angle, right_thrust_angle, left_thrust_cmd, right_thrust_cmd, control_inputs_time)
 
 def plot_data(error_pose_x, error_pose_y, error_pose_yaw, error_pose_time,
               ref_pose_x, ref_pose_y, ref_pose_yaw, ref_pose_time,
               pose_gt_x, pose_gt_y, pose_gt_yaw, pose_gt_time,
+              twist_gt_x, twist_gt_y, twist_gt_psi,
               ekf_pose_x, ekf_pose_y, ekf_pose_yaw, ekf_pose_time,
+              ekf_twist_x, ekf_twist_y, ekf_twist_psi,
               left_thrust_angle, right_thrust_angle, left_thrust_cmd, right_thrust_cmd, control_inputs_time):
     # Plot Figure 1: Error States
     fig, axs = plt.subplots(3, 1, figsize=(10, 10))
@@ -185,33 +201,54 @@ def plot_data(error_pose_x, error_pose_y, error_pose_yaw, error_pose_time,
     plt.tight_layout()
     # plt.show()
 
-    # Plot Figure 4: ekf states
-    fig5, axs5 = plt.subplots(3, 1, figsize=(10, 10))
-    fig5.suptitle('Ground truth and EKF States')
+    # Plot Figure 5: ekf states
+    fig5, axs5 = plt.subplots(3, 2, figsize=(15, 10))  # 3 rows, 2 columns
+    fig5.suptitle('Ground Truth and EKF States', fontsize=14)
 
-    axs5[0].plot(pose_gt_time, pose_gt_x, 'b-', label="Ground truth X")
-    axs5[0].plot(ekf_pose_time, ekf_pose_x, 'r-', label="EKF X")
-    axs5[0].legend()
-    axs5[0].set_ylabel("X Position")
+    # Left Column: Position States
+    axs5[0, 0].plot(pose_gt_time, pose_gt_x, 'b-', label="Ground Truth X")
+    axs5[0, 0].plot(ekf_pose_time, ekf_pose_x, 'r-', label="EKF X")
+    axs5[0, 0].legend()
+    axs5[0, 0].set_ylabel("X Position (m)")
 
-    axs5[1].plot(pose_gt_time, pose_gt_y, 'b-', label="Ground truth Y")
-    axs5[1].plot(ekf_pose_time, ekf_pose_y, 'r-', label="EKF Y")
-    axs5[1].legend()
-    axs5[1].set_ylabel("Y Position")
+    axs5[1, 0].plot(pose_gt_time, pose_gt_y, 'b-', label="Ground Truth Y")
+    axs5[1, 0].plot(ekf_pose_time, ekf_pose_y, 'r-', label="EKF Y")
+    axs5[1, 0].legend()
+    axs5[1, 0].set_ylabel("Y Position (m)")
+    axs5[1, 0].set_ylim(-0.2, 0.2)
 
-    axs5[2].plot(pose_gt_time, pose_gt_yaw, 'b-', label="Ground truth Yaw")
-    axs5[2].plot(ekf_pose_time, ekf_pose_yaw, 'r-', label="EKF Yaw")
-    axs5[2].legend()
-    axs5[2].set_ylabel("Yaw")
+    axs5[2, 0].plot(pose_gt_time, pose_gt_yaw, 'b-', label="Ground Truth Yaw")
+    axs5[2, 0].plot(ekf_pose_time, ekf_pose_yaw, 'r-', label="EKF Yaw")
+    axs5[2, 0].legend()
+    axs5[2, 0].set_ylabel("Yaw (rad)")
+    axs5[2, 0].set_ylim(-0.2, 0.2)
 
-    for ax in axs5:
+    # Right Column: Velocity States
+    axs5[0, 1].plot(pose_gt_time, twist_gt_x, 'b-', label="Ground Truth u")
+    axs5[0, 1].plot(ekf_pose_time, ekf_twist_x, 'r-', label="EKF u")
+    axs5[0, 1].legend()
+    axs5[0, 1].set_ylabel("Twist X (m/s)")
+
+    axs5[1, 1].plot(pose_gt_time, twist_gt_y, 'b-', label="Ground Truth v")
+    axs5[1, 1].plot(ekf_pose_time, ekf_twist_y, 'r-', label="EKF v")
+    axs5[1, 1].legend()
+    axs5[1, 1].set_ylabel("Twist Y (m/s)")
+
+    axs5[2, 1].plot(pose_gt_time, twist_gt_psi, 'b-', label="Ground Truth r")
+    axs5[2, 1].plot(ekf_pose_time, ekf_twist_psi, 'r-', label="EKF r")
+    axs5[2, 1].legend()
+    axs5[2, 1].set_ylabel("Twist Psi (rad/s)")
+
+    # Set x-labels and adjust layout
+    for ax in axs5.flat:
         ax.set_xlabel("Time (s)")
-    plt.tight_layout()
+    plt.tight_layout(rect=[0, 0, 1, 0.95])  # Adjust for suptitle
+    plt.show()
     plt.show()
 
 def main():
     # Specify your bag folder path
-    bag_dir = 'forward0312_0'  # Adjust this to your actual path, e.g., '/path/to/forward0303_0'
+    bag_dir = 'forward0314_0'  # Adjust this to your actual path, e.g., '/path/to/forward0303_0'
 
     # Initialize rclpy for message deserialization
     rclpy.init()

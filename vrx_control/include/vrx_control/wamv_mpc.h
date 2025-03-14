@@ -19,6 +19,8 @@
 #include <tuple>
 #include <iomanip>
 #include <random>
+#include <deque>    
+#include <numeric>
 
 #include "acados/utils/print.h"
 #include "acados_c/ocp_nlp_interface.h"
@@ -85,6 +87,7 @@ class WAMV_MPC : public rclcpp::Node
         double x;
         double y;
         double z;
+        double psi;
     };
 
     struct SolverParam{
@@ -93,10 +96,17 @@ class WAMV_MPC : public rclcpp::Node
         double delta_p_pre;
         double delta_s_pre;
     };
+    struct ImuFilter{
+        double p_smoothed, q_smoothed, r_smoothed;
+        double phi_smoothed, theta_smoothed, psi_smoothed;
+        double x_smoothed, y_smoothed, z_smoothed;
+    }imu_filter;
 
     LocalPos local_pos;
     LocalPos imu_pos;
+    LocalPos pre_ekf_pos;
     Acc imu_acc;
+    Acc ekf_acc;
 
     // Acados variables
     SolverInput acados_in;
@@ -119,16 +129,16 @@ class WAMV_MPC : public rclcpp::Node
     Matrix<double,3,1> v_body;      // velocity u, v, r in body frame
     Matrix<double,3,1> v_inertial;  // velocity u, v, r in inertial frame
 
-    double dt = 0.05;
+    double dt = 0.01;
     double mass = 180;
     double LCG = 2.373776;
     double B = 2.05427;
-    double xu = 100;
-    double xuu = 150;
-    double yv = 100;
-    double yvv = 100;
-    double nr = 800;
-    double nrr = 800;
+    double xu = -100;
+    double xuu = -150;
+    double yv = -100;
+    double yvv = -100;
+    double nr = -800;
+    double nrr = -800;
     Matrix<double,1,3> M_values;
     Matrix<double,3,3> M;           // mass matrix
     Matrix<double,3,3> invM;        // inverse mass matrix
@@ -177,8 +187,13 @@ class WAMV_MPC : public rclcpp::Node
     Matrix<double,9,9> esti_P;    // estimate covariance
     Matrix<double,1,9> Q_cov;      // process noise value
     Matrix<double,9,9> noise_Q;   // process noise matrix
-    MatrixXd noise_R = MatrixXd::Identity(m, m)*(pow(dt,4)/4); // measurement noise matrix
+    // MatrixXd noise_R = MatrixXd::Identity(m, m)*(pow(dt,4)/4); // measurement noise matrix
+    Matrix<double,1,9> R_cov;
+    Matrix<double,9,9> noise_R;
     Matrix<double,3,1> tau;
+    bool imu_data_available = false, odom_data_available = false;
+    Matrix<double, 4, 4> noise_R_imu;
+    Matrix<double,1,4> R_imu_cov;
 
     // Other variables
     // tf2::Quaternion tf_quaternion;
@@ -190,6 +205,10 @@ class WAMV_MPC : public rclcpp::Node
     float yaw_diff;         // yaw degree difference in every step
     float yaw_ref;          // yaw degree reference in form of (-pi, pi)
     float yaw_error;        // yaw degree error
+
+    // Buffers for low-pass filtering
+    const double alpha = 0.2; // Smoothing factor (0 < alpha < 1, lower = smoother)
+    bool first_imu = true; // To initialize smoothed values
 
     public:
 
@@ -208,6 +227,8 @@ class WAMV_MPC : public rclcpp::Node
     MatrixXd h(MatrixXd x);                                 // measurement model
     MatrixXd compute_jacobian_F(MatrixXd x, MatrixXd u);    // compute Jacobian of system process model
     MatrixXd compute_jacobian_H(MatrixXd x);                // compute Jacobian of measurement model
+    MatrixXd h_imu(MatrixXd x);
+    MatrixXd compute_jacobian_H_imu(MatrixXd x);
 };
 
 #endif

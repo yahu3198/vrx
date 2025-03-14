@@ -54,9 +54,9 @@ def export_wamv_model() -> AcadosModel:
     added_mass = np.array([0, 0, 0, 0, 0, 0])
     M = np.diag([m + added_mass[0], m + added_mass[1], Izz + added_mass[5]])
     M_inv = np.linalg.inv(M)
-    xu, xuu = 100, 150
-    yv, yvv = 100, 100
-    nr, nrr = 800, 800
+    xu, xuu = -100, -150
+    yv, yvv = -100, -100
+    nr, nrr = -800, -800
 
     # Thrust allocation
     Tx = Tp * cos(delta_p) + Ts * cos(delta_s)
