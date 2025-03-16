@@ -533,8 +533,8 @@ void wamv_acados_setup_nlp_in(wamv_solver_capsule* capsule, const int N, double*
     W_0[9+(NY0) * 9] = 800;
     W_0[10+(NY0) * 10] = 1;
     W_0[11+(NY0) * 11] = 1;
-    W_0[12+(NY0) * 12] = 1;
-    W_0[13+(NY0) * 13] = 1;
+    W_0[12+(NY0) * 12] = 10;
+    W_0[13+(NY0) * 13] = 10;
     ocp_nlp_cost_model_set(nlp_config, nlp_dims, nlp_in, 0, "W", W_0);
     free(W_0);
     double* yref = calloc(NY, sizeof(double));
@@ -559,8 +559,8 @@ void wamv_acados_setup_nlp_in(wamv_solver_capsule* capsule, const int N, double*
     W[9+(NY) * 9] = 800;
     W[10+(NY) * 10] = 1;
     W[11+(NY) * 11] = 1;
-    W[12+(NY) * 12] = 1;
-    W[13+(NY) * 13] = 1;
+    W[12+(NY) * 12] = 10;
+    W[13+(NY) * 13] = 10;
 
     for (int i = 1; i < N; i++)
     {

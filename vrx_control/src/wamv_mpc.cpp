@@ -38,7 +38,7 @@ WAMV_MPC::WAMV_MPC()
     // ros subsriber & publisher
     states_sub = this->create_subscription<nav_msgs::msg::Odometry>(
         "/wamv/sensors/position/ground_truth_odometry",
-        10,
+        20,
         std::bind(&WAMV_MPC::states_cb, this, std::placeholders::_1));
     
     left_thrust_angle_pub = this->create_publisher<std_msgs::msg::Float64>(
@@ -57,6 +57,8 @@ WAMV_MPC::WAMV_MPC()
             "/wamv/control_inputs", 20);
     ekf_pose_pub = this->create_publisher<nav_msgs::msg::Odometry>(
         "/wamv/ekf_pose", 20);
+    disturbance_pub = this->create_publisher<geometry_msgs::msg::TwistStamped>(
+        "/wamv/disturbance", 20);
 
     // initialize
     for(unsigned int i=0; i < WAMV_NU; i++) acados_out.u0[i] = 0.0;
@@ -185,7 +187,10 @@ void WAMV_MPC::imu_cb(const sensor_msgs::msg::Imu::SharedPtr msg)
     imu_pos.theta = imu_filter.theta_smoothed;
     imu_pos.psi = imu_filter.psi_smoothed;
 
-    imu_data_available = true;
+    if (!std::isnan(imu_pos.psi) && !std::isnan(imu_pos.r) && 
+        !std::isnan(imu_acc.x) && !std::isnan(imu_acc.y)) {
+        imu_data_available = true;
+    }
 }
 
 // read trajectory data
@@ -343,20 +348,24 @@ void WAMV_MPC::solve()
     }
 
     // Solve OCP
-    acados_status = wamv_acados_solve(mpc_capsule);
+    // acados_status = wamv_acados_solve(mpc_capsule);
 
-    if (acados_status != 0){
-        RCLCPP_INFO(this->get_logger(), "acados returned status: %d", acados_status);
-    }
+    // if (acados_status != 0){
+    //     RCLCPP_INFO(this->get_logger(), "acados returned status: %d", acados_status);
+    // }
 
-    acados_out.status = acados_status;
-    acados_out.kkt_res = (double)mpc_capsule->nlp_out->inf_norm_res;
+    // acados_out.status = acados_status;
+    // acados_out.kkt_res = (double)mpc_capsule->nlp_out->inf_norm_res;
 
-    // ocp_nlp_get(mpc_capsule->nlp_config, mpc_capsule->nlp_solver, "time_tot", &acados_out.cpu_time);
-    ocp_nlp_get(mpc_capsule->nlp_solver, "time_tot", &acados_out.cpu_time);
+    // // ocp_nlp_get(mpc_capsule->nlp_config, mpc_capsule->nlp_solver, "time_tot", &acados_out.cpu_time);
+    // ocp_nlp_get(mpc_capsule->nlp_solver, "time_tot", &acados_out.cpu_time);
 
-    ocp_nlp_out_get(mpc_capsule->nlp_config, mpc_capsule->nlp_dims, mpc_capsule->nlp_out, 0, "u", (void *)acados_out.u0);
+    // ocp_nlp_out_get(mpc_capsule->nlp_config, mpc_capsule->nlp_dims, mpc_capsule->nlp_out, 0, "u", (void *)acados_out.u0);
 
+    acados_out.u0[0] = 0;
+    acados_out.u0[1] = 0;
+    acados_out.u0[2] = 0;
+    acados_out.u0[3] = 0;
     publish_cin(acados_out.u0[0], acados_out.u0[1], acados_out.u0[2], acados_out.u0[3]);
     
     solver_param.Tp_pre = acados_out.u0[0];
@@ -376,6 +385,7 @@ void WAMV_MPC::solve()
         std::cout << "vel_x:  " << local_pos.u << "  vel_y:  " << local_pos.v << "  vel_r:  " << local_pos.r << std::endl;
         std::cout << "ekf vel_x:  " << esti_x[3] << "  vel_y:  " << esti_x[4] << "  vel_r:  " << esti_x[5] << std::endl;
         std::cout << "ekf w_x:  " << esti_x[6] << "  w_y:  " << esti_x[7] << "  w_psi:  " << esti_x[8] << std::endl;
+        std::cout << "ekf acc_x:  " << ekf_acc.x << "  acc_y:  " << ekf_acc.y << "  acc_psi:  " << ekf_acc.psi << std::endl;
         std::cout << "Tp:  " << acados_out.u0[0] << "  Ts:  " << acados_out.u0[1] << "  delta_p:  " << acados_out.u0[2] << "  delta_s:  " << acados_out.u0[3] << std::endl;
         std::cout << "z:  " << "  Tp_z:  " << z[0] << "  Ts_z:  " << z[1] << "  delta_p_z:  " << z[2] << "  delta_s_z:  " << z[3] << std::endl;
         std::cout << "solve_time: "<< acados_out.cpu_time << "\tkkt_res: " << acados_out.kkt_res << "\tacados_status: " << acados_out.status << std::endl;
@@ -568,6 +578,12 @@ void WAMV_MPC::EKF()
     ekf_pose.child_frame_id = "base_link";
 
     ekf_pose_pub->publish(ekf_pose);
+
+    disturbance.header.stamp = rclcpp::Clock().now();
+    disturbance.twist.linear.x = esti_x[6];
+    disturbance.twist.linear.y = esti_x[7];
+    disturbance.twist.angular.z = esti_x[8];
+    disturbance_pub->publish(disturbance);
     
     // H = compute_jacobian_H(x_pred);                         // compute Jacobian of measurement model at predicted state
     // y_pred = h(x_pred);                                     // predict measurement at time k+1
@@ -587,7 +603,7 @@ MatrixXd WAMV_MPC::RK4(MatrixXd x, MatrixXd u)
 
     k1 = f(x, u) * dt;
     k2 = f(x+k1/2, u) * dt;
-    k3 = f(x+k2/3, u) * dt;
+    k3 = f(x+k2/2, u) * dt;
     k4 = f(x+k3, u) * dt;
 
     return x + (k1+2*k2+2*k3+k4)/6;

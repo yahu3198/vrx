@@ -41,6 +41,11 @@ def read_bag_data(bag_dir):
     right_thrust_cmd = []
     control_inputs_time = []
 
+    disturbance_x = []
+    disturbance_y = []
+    disturbance_psi = []
+    disturbance_time = []
+
     # Setup ROS 2 bag reader
     storage_options = StorageOptions(
         uri=bag_dir,
@@ -96,6 +101,13 @@ def read_bag_data(bag_dir):
             right_thrust_angle.append(msg.twist.angular.x)
             right_thrust_cmd.append(msg.twist.angular.y)
             control_inputs_time.append(timestamp_sec)
+        
+        elif topic == '/wamv/disturbance':
+            msg = deserialize_message(data, TwistStamped)
+            disturbance_x.append(msg.twist.linear.x)
+            disturbance_y.append(msg.twist.linear.y)
+            disturbance_psi.append(msg.twist.angular.z)
+            disturbance_time.append(timestamp_sec)
 
         elif topic == '/wamv/ekf_pose':
             msg = deserialize_message(data, Odometry)
@@ -115,7 +127,8 @@ def read_bag_data(bag_dir):
             twist_gt_x, twist_gt_y, twist_gt_psi,
             ekf_pose_x, ekf_pose_y, ekf_pose_yaw, ekf_pose_time,
             ekf_twist_x, ekf_twist_y, ekf_twist_psi,
-            left_thrust_angle, right_thrust_angle, left_thrust_cmd, right_thrust_cmd, control_inputs_time)
+            left_thrust_angle, right_thrust_angle, left_thrust_cmd, right_thrust_cmd, control_inputs_time,
+            disturbance_x, disturbance_y, disturbance_psi, disturbance_time)
 
 def plot_data(error_pose_x, error_pose_y, error_pose_yaw, error_pose_time,
               ref_pose_x, ref_pose_y, ref_pose_yaw, ref_pose_time,
@@ -123,82 +136,83 @@ def plot_data(error_pose_x, error_pose_y, error_pose_yaw, error_pose_time,
               twist_gt_x, twist_gt_y, twist_gt_psi,
               ekf_pose_x, ekf_pose_y, ekf_pose_yaw, ekf_pose_time,
               ekf_twist_x, ekf_twist_y, ekf_twist_psi,
-              left_thrust_angle, right_thrust_angle, left_thrust_cmd, right_thrust_cmd, control_inputs_time):
+              left_thrust_angle, right_thrust_angle, left_thrust_cmd, right_thrust_cmd, control_inputs_time,
+              disturbance_x, disturbance_y, disturbance_psi, disturbance_time):
     # Plot Figure 1: Error States
-    fig, axs = plt.subplots(3, 1, figsize=(10, 10))
-    fig.suptitle('Error States')
+    # fig, axs = plt.subplots(3, 1, figsize=(10, 10))
+    # fig.suptitle('Error States')
 
-    axs[0].plot(error_pose_time, error_pose_x, label="X Error")
-    axs[0].axhline(0, color='black', linestyle='--')
-    axs[0].set_ylabel("X Error")
-    axs[0].legend()
+    # axs[0].plot(error_pose_time, error_pose_x, label="X Error")
+    # axs[0].axhline(0, color='black', linestyle='--')
+    # axs[0].set_ylabel("X Error")
+    # axs[0].legend()
 
-    axs[1].plot(error_pose_time, error_pose_y, label="Y Error")
-    axs[1].axhline(0, color='black', linestyle='--')
-    axs[1].set_ylabel("Y Error")
-    axs[1].legend()
+    # axs[1].plot(error_pose_time, error_pose_y, label="Y Error")
+    # axs[1].axhline(0, color='black', linestyle='--')
+    # axs[1].set_ylabel("Y Error")
+    # axs[1].legend()
 
-    axs[2].plot(error_pose_time, error_pose_yaw, label="Yaw Error")
-    axs[2].axhline(0, color='black', linestyle='--')
-    axs[2].set_ylabel("Yaw Error")
-    axs[2].legend()
+    # axs[2].plot(error_pose_time, error_pose_yaw, label="Yaw Error")
+    # axs[2].axhline(0, color='black', linestyle='--')
+    # axs[2].set_ylabel("Yaw Error")
+    # axs[2].legend()
 
-    for ax in axs:
-        ax.set_xlabel("Time (s)")
-    plt.tight_layout()
+    # for ax in axs:
+    #     ax.set_xlabel("Time (s)")
+    # plt.tight_layout()
 
     # Plot Figure 2: Reference and True States
-    fig2, axs2 = plt.subplots(3, 1, figsize=(10, 10))
-    fig2.suptitle('Reference and MPC States')
+    # fig2, axs2 = plt.subplots(3, 1, figsize=(10, 10))
+    # fig2.suptitle('Reference and MPC States')
 
-    axs2[0].plot(ref_pose_time, ref_pose_x, 'r-', label="Reference X")
-    axs2[0].plot(pose_gt_time, pose_gt_x, 'b-', label="MPC X")
-    axs2[0].legend()
-    axs2[0].set_ylabel("X Position")
+    # axs2[0].plot(ref_pose_time, ref_pose_x, 'r-', label="Reference X")
+    # axs2[0].plot(pose_gt_time, pose_gt_x, 'b-', label="MPC X")
+    # axs2[0].legend()
+    # axs2[0].set_ylabel("X Position")
 
-    axs2[1].plot(ref_pose_time, ref_pose_y, 'r-', label="Reference Y")
-    axs2[1].plot(pose_gt_time, pose_gt_y, 'b-', label="MPC Y")
-    axs2[1].legend()
-    axs2[1].set_ylabel("Y Position")
+    # axs2[1].plot(ref_pose_time, ref_pose_y, 'r-', label="Reference Y")
+    # axs2[1].plot(pose_gt_time, pose_gt_y, 'b-', label="MPC Y")
+    # axs2[1].legend()
+    # axs2[1].set_ylabel("Y Position")
 
-    axs2[2].plot(ref_pose_time, ref_pose_yaw, 'r-', label="Reference Yaw")
-    axs2[2].plot(pose_gt_time, pose_gt_yaw, 'b-', label="MPC Yaw")
-    axs2[2].legend()
-    axs2[2].set_ylabel("Yaw")
+    # axs2[2].plot(ref_pose_time, ref_pose_yaw, 'r-', label="Reference Yaw")
+    # axs2[2].plot(pose_gt_time, pose_gt_yaw, 'b-', label="MPC Yaw")
+    # axs2[2].legend()
+    # axs2[2].set_ylabel("Yaw")
 
-    for ax in axs2:
-        ax.set_xlabel("Time (s)")
-    plt.tight_layout()
+    # for ax in axs2:
+    #     ax.set_xlabel("Time (s)")
+    # plt.tight_layout()
 
-    # Plot Figure 3: Control Inputs
-    fig3, axs3 = plt.subplots(2, 1, figsize=(10, 6))
-    fig3.suptitle('Control Inputs')
+    # # Plot Figure 3: Control Inputs
+    # fig3, axs3 = plt.subplots(2, 1, figsize=(10, 6))
+    # fig3.suptitle('Control Inputs')
 
-    axs3[0].plot(control_inputs_time, left_thrust_angle, 'r-', label="Left Thrust Angle")
-    axs3[0].plot(control_inputs_time, right_thrust_angle, 'b-', label="Right Thrust Angle")
-    axs3[0].legend()
-    axs3[0].set_ylabel("Thrust Angle (rad)")
+    # axs3[0].plot(control_inputs_time, left_thrust_angle, 'r-', label="Left Thrust Angle")
+    # axs3[0].plot(control_inputs_time, right_thrust_angle, 'b-', label="Right Thrust Angle")
+    # axs3[0].legend()
+    # axs3[0].set_ylabel("Thrust Angle (rad)")
 
-    axs3[1].plot(control_inputs_time, left_thrust_cmd, 'r-', label="Left Thrust Command")
-    axs3[1].plot(control_inputs_time, right_thrust_cmd, 'b-', label="Right Thrust Command")
-    axs3[1].legend()
-    axs3[1].set_ylabel("Thrust Command")
+    # axs3[1].plot(control_inputs_time, left_thrust_cmd, 'r-', label="Left Thrust Command")
+    # axs3[1].plot(control_inputs_time, right_thrust_cmd, 'b-', label="Right Thrust Command")
+    # axs3[1].legend()
+    # axs3[1].set_ylabel("Thrust Command")
 
-    for ax in axs3:
-        ax.set_xlabel("Time (s)")
-    plt.tight_layout()
+    # for ax in axs3:
+    #     ax.set_xlabel("Time (s)")
+    # plt.tight_layout()
 
     # Plot Figure 4: Trajectory in XY Plane
-    fig4, ax4 = plt.subplots(figsize=(10, 8))
-    fig4.suptitle('Trajectory in XY Plane')
+    # fig4, ax4 = plt.subplots(figsize=(10, 8))
+    # fig4.suptitle('Trajectory in XY Plane')
 
-    ax4.plot(ref_pose_x, ref_pose_y, 'r-', label="Reference Trajectory")
-    ax4.plot(pose_gt_x, pose_gt_y, 'b-', label="MPC Trajectory")
-    ax4.set_xlabel("X Position")
-    ax4.set_ylabel("Y Position")
-    ax4.legend()
+    # ax4.plot(ref_pose_x, ref_pose_y, 'r-', label="Reference Trajectory")
+    # ax4.plot(pose_gt_x, pose_gt_y, 'b-', label="MPC Trajectory")
+    # ax4.set_xlabel("X Position")
+    # ax4.set_ylabel("Y Position")
+    # ax4.legend()
 
-    plt.tight_layout()
+    # plt.tight_layout()
     # plt.show()
 
     # Plot Figure 5: ekf states
@@ -233,22 +247,46 @@ def plot_data(error_pose_x, error_pose_y, error_pose_yaw, error_pose_time,
     axs5[1, 1].plot(ekf_pose_time, ekf_twist_y, 'r-', label="EKF v")
     axs5[1, 1].legend()
     axs5[1, 1].set_ylabel("Twist Y (m/s)")
+    # axs5[1, 1].set_ylim(-0.2, 0.2)
 
     axs5[2, 1].plot(pose_gt_time, twist_gt_psi, 'b-', label="Ground Truth r")
     axs5[2, 1].plot(ekf_pose_time, ekf_twist_psi, 'r-', label="EKF r")
     axs5[2, 1].legend()
     axs5[2, 1].set_ylabel("Twist Psi (rad/s)")
+    # axs5[2, 1].set_ylim(-0.2, 0.2)
 
     # Set x-labels and adjust layout
     for ax in axs5.flat:
         ax.set_xlabel("Time (s)")
     plt.tight_layout(rect=[0, 0, 1, 0.95])  # Adjust for suptitle
-    plt.show()
+    # plt.show()
+    # plt.show()
+
+    # Plot Figure 6: disturbances
+    fig6, axs6 = plt.subplots(3, 1, figsize=(10, 10))
+    fig6.suptitle('Disturbances')
+
+    axs6[0].plot(disturbance_time, disturbance_x, 'r-', label="Disturbance X")
+    axs6[0].legend()
+    axs6[0].set_ylabel("Disturbance Force (N)")
+
+    axs6[1].plot(disturbance_time, disturbance_y, 'r-', label="Disturbance Y")
+    axs6[1].legend()
+    axs6[1].set_ylabel("Disturbance Force (N)")
+
+    axs6[2].plot(disturbance_time, disturbance_psi, 'r-', label="Disturbance Psi")
+    axs6[2].legend()
+    axs6[2].set_ylabel("Disturbance moment (Nm)")
+
+    for ax in axs6:
+        ax.set_xlabel("Time (s)")
+    plt.tight_layout()
+
     plt.show()
 
 def main():
     # Specify your bag folder path
-    bag_dir = 'forward0314_0'  # Adjust this to your actual path, e.g., '/path/to/forward0303_0'
+    bag_dir = 'forward0316_5'  # Adjust this to your actual path, e.g., '/path/to/forward0303_0'
 
     # Initialize rclpy for message deserialization
     rclpy.init()

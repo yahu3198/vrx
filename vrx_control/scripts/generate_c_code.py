@@ -24,7 +24,7 @@ def main():
     # Cost
     W_x = np.diag([1000, 200, 200, 200, 50, 50])     # x,y,psi,u,v,r
     W_u = np.diag([0.5, 0.5, 800, 800])             #Tp,Ts,delta_p,delta_s
-    W_du = np.diag([1, 1, 1, 1])        
+    W_du = np.diag([1, 1, 10, 10])        
     W = block_diag(W_x, W_u, W_du)
     ocp.cost.W = W
     ocp.cost.W_e = W_x
