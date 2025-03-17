@@ -461,6 +461,9 @@ void WAMV_MPC::solve()
         fault_status = "NORMAL";
         fault_color = "\033[32m"; // Green
     }
+    // Calculate calibrated w_psi for display
+    double calibrated_wpsi = getCalibrated_wpsi();
+
     if(cout_counter > 2){
         std::cout << "---------------------------------------------------------------------------------------------------------------------" << std::endl;
         std::cout << "ref_x:    " << acados_in.yref[0][0] << "\tref_y:   " << acados_in.yref[0][1] << "\tref_yaw:    " << acados_in.yref[0][2] << std::endl;
@@ -470,12 +473,12 @@ void WAMV_MPC::solve()
         std::cout << "vel_x:  " << local_pos.u << "  vel_y:  " << local_pos.v << "  vel_r:  " << local_pos.r << std::endl;
         std::cout << "ekf vel_x:  " << esti_x[3] << "  vel_y:  " << esti_x[4] << "  vel_r:  " << esti_x[5] << std::endl;
         std::cout << "ekf w_x:  " << esti_x[6] << "  w_y:  " << esti_x[7] << "  w_psi:  " << esti_x[8] << std::endl;
+        std::cout << "calibrated w_psi: " << calibrated_wpsi << " (raw: " << esti_x[8] << ", expected: " << (Ts.data - Tp.data) * wpsi_coefficient << ")" << std::endl;
         std::cout << "ekf acc_x:  " << ekf_acc.x << "  acc_y:  " << ekf_acc.y << "  acc_psi:  " << ekf_acc.psi << std::endl;
         std::cout << "Tp:  " << acados_out.u0[0] << "  Ts:  " << acados_out.u0[1] << "  delta_p:  " << acados_out.u0[2] << "  delta_s:  " << acados_out.u0[3] << std::endl;
         std::cout << "z:  " << "  Tp_z:  " << z[0] << "  Ts_z:  " << z[1] << "  delta_p_z:  " << z[2] << "  delta_s_z:  " << z[3] << std::endl;
         std::cout << "solve_time: "<< acados_out.cpu_time << "\tkkt_res: " << acados_out.kkt_res << "\tacados_status: " << acados_out.status << std::endl;
         std::cout << "relative_time: " << std::fixed << (current_time - start_time) << std::endl;
-        // Add the fault diagnosis status:
         std::cout << fault_color << "FAULT STATUS: " << fault_status;
         if (fault_detected) {
             std::cout << " (Confidence: " << std::fixed << std::setprecision(2) << fault_detection_confidence * 100.0 << "%)";
@@ -1050,13 +1053,18 @@ bool WAMV_MPC::detectFault(const VectorXd& features, int& fault_type, double& co
     // Get trend values
     double wpsi_trend = features[8];
     
+    // Calculate calibrated w_psi for logs
+    double calibrated_wpsi = getCalibrated_wpsi();
+    
     // Print debug information periodically
     static int debug_counter = 0;
     if (debug_counter++ % 20 == 0) {
         std::cout << "\033[1;35m" << "PATTERN DEBUG - wx: " << wx
-                  << ", wy: " << wy << ", wpsi: " << wpsi 
+                  << ", wy: " << wy << ", raw_wpsi: " << wpsi 
+                  << ", calibrated_wpsi: " << calibrated_wpsi
                   << ", wpsi_trend: " << wpsi_trend 
                   << ", Tp: " << Tp.data << ", Ts: " << Ts.data
+                  << ", coef: " << wpsi_coefficient
                   << "\033[0m" << std::endl;
     }
     
@@ -1238,7 +1246,8 @@ bool WAMV_MPC::detectFault(const VectorXd& features, int& fault_type, double& co
             
             if (left_thrust_score > 0.7) {
                 std::cout << "\033[1;33m" << "LEFT THRUST FAILURE DETECTED BY TREND: wpsi_change = " 
-                          << wpsi_change << ", wpsi_trend = " << wpsi_trend << "\033[0m" << std::endl;
+                          << wpsi_change << ", wpsi_trend = " << wpsi_trend 
+                          << ", calibrated_wpsi = " << calibrated_wpsi << "\033[0m" << std::endl;
             }
         }
         
@@ -1249,7 +1258,8 @@ bool WAMV_MPC::detectFault(const VectorXd& features, int& fault_type, double& co
             
             if (right_thrust_score > 0.7) {
                 std::cout << "\033[1;33m" << "RIGHT THRUST FAILURE DETECTED BY TREND: wpsi_change = " 
-                          << wpsi_change << ", wpsi_trend = " << wpsi_trend << "\033[0m" << std::endl;
+                          << wpsi_change << ", wpsi_trend = " << wpsi_trend 
+                          << ", calibrated_wpsi = " << calibrated_wpsi << "\033[0m" << std::endl;
             }
         }
         
@@ -1361,6 +1371,9 @@ void WAMV_MPC::publishFaultDiagnosis(int fault_type, double confidence)
     auto message = std::make_unique<std_msgs::msg::String>();
     std::string fault_str;
     
+    // Get calibrated w_psi
+    double calibrated_wpsi = getCalibrated_wpsi();
+    
     switch (fault_type) {
         case NO_FAULT:
             fault_str = "NO_FAULT";
@@ -1385,7 +1398,6 @@ void WAMV_MPC::publishFaultDiagnosis(int fault_type, double confidence)
                    std::to_string(confidence * 100.0) + "%)";
     fault_diagnosis_pub->publish(*message);
     
-    // Add more detailed logging for debugging
     RCLCPP_INFO(this->get_logger(), "FAULT DIAGNOSIS: %s (Confidence: %.2f%%)", 
                fault_str.c_str(), confidence * 100.0);
                
@@ -1394,9 +1406,10 @@ void WAMV_MPC::publishFaultDiagnosis(int fault_type, double confidence)
               << " (Confidence: " << std::fixed << std::setprecision(2) 
               << confidence * 100.0 << "%)" << "\033[0m" << std::endl;
               
-    // Print current disturbance values and thrusts
+    // Print current disturbance values and thrusts with calibrated w_psi
     std::cout << "\033[1;36m" << "  Disturbances - w_x: " << esti_x[6] 
-              << ", w_y: " << esti_x[7] << ", w_psi: " << esti_x[8] << "\033[0m" << std::endl;
+              << ", w_y: " << esti_x[7] << ", raw w_psi: " << esti_x[8] 
+              << ", calibrated w_psi: " << calibrated_wpsi << "\033[0m" << std::endl;
               
     std::cout << "\033[1;36m" << "  Thrusts - Tp: " << Tp.data 
               << ", Ts: " << Ts.data << ", delta_p: " << delta_p.data 

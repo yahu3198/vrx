@@ -276,6 +276,22 @@ class WAMV_MPC : public rclcpp::Node
     bool calibration_enabled;                                 // Flag to enable/disable calibration
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr wpsi_coefficient_pub; // Publisher for coefficient
 
+    double getCalibrated_wpsi() const {
+        // Current w_psi value
+        double raw_wpsi = esti_x[8];
+        
+        // Calculate thrust differential
+        double thrust_diff = Ts.data - Tp.data;
+        
+        // Expected w_psi based on thrust differential
+        double expected_wpsi = thrust_diff * wpsi_coefficient;
+        
+        // Calibrated value: actual minus expected
+        double calibrated_wpsi = raw_wpsi - expected_wpsi;
+        
+        return calibrated_wpsi;
+    }
+
     public:
 
     bool is_start;
