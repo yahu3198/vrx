@@ -22,6 +22,11 @@
 #include <deque>    
 #include <numeric>
 
+#include <Eigen/Dense>
+#include <fstream>
+#include <std_msgs/msg/string.hpp>
+#include <std_msgs/msg/float64_multi_array.hpp>
+
 #include "acados/utils/print.h"
 #include "acados_c/ocp_nlp_interface.h"
 #include "acados_c/external_function_interface.h"
@@ -55,6 +60,31 @@ class WAMV_MPC : public rclcpp::Node
         u2 = 1,
         u3 = 2,
         u4 = 3,
+    };
+
+    enum ThrusterFaultType {
+        NO_FAULT = 0,
+        LEFT_THRUST_FAILURE = 1,
+        RIGHT_THRUST_FAILURE = 2,
+        LEFT_ANGLE_FAILURE = 3,
+        RIGHT_ANGLE_FAILURE = 4
+    };
+
+    struct OnlineLogisticRegression {
+        // Model parameters
+        MatrixXd weights;  // Weights for the logistic regression model
+        double bias;       // Bias term
+        double learning_rate;  // Learning rate for gradient descent
+        double lambda;     // Regularization parameter
+        
+        // Data buffers for features and targets
+        int buffer_size;   // Size of the sliding window
+        std::deque<VectorXd> feature_buffer;  // Buffer for features
+        std::deque<int> label_buffer;         // Buffer for labels (fault or no fault)
+        
+        // Feature extraction parameters
+        int feature_dim;   // Dimension of feature vector
+        double detect_threshold;  // Threshold for fault detection
     };
 
     struct SolverInput{
@@ -208,9 +238,36 @@ class WAMV_MPC : public rclcpp::Node
     float yaw_ref;          // yaw degree reference in form of (-pi, pi)
     float yaw_error;        // yaw degree error
 
+    size_t iteration_count = 0;  // Add counter
+    const size_t fault_trigger = 400;  // 20s at 20 Hz
+
     // Buffers for low-pass filtering
     const double alpha = 0.2; // Smoothing factor (0 < alpha < 1, lower = smoother)
     bool first_imu = true; // To initialize smoothed values
+
+    // Parameters for feature extraction
+    int window_size;                  // Size of sliding window for feature extraction
+    std::deque<Vector3d> dist_buffer; // Buffer for disturbance values
+    int detection_count_threshold;    // Number of consecutive detections needed to confirm fault
+    int detection_counter;            // Counter for consecutive detections
+    bool fault_detected;              // Flag indicating if a fault is currently detected
+    int current_fault_type;           // Current detected fault type
+    double fault_detection_confidence; // Confidence level of fault detection
+
+    // Fault diagnosis model
+    OnlineLogisticRegression fault_model;
+    
+    // Threshold values for fault detection
+    double wx_threshold;
+    double wy_threshold;
+    double wpsi_threshold;
+
+    // Previous thruster commands for comparison
+    double prev_Tp, prev_Ts, prev_delta_p, prev_delta_s;
+    
+    // Publishers for fault diagnosis results
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr fault_diagnosis_pub;
+    rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr fault_features_pub;
 
     public:
 
@@ -231,6 +288,15 @@ class WAMV_MPC : public rclcpp::Node
     MatrixXd compute_jacobian_H(MatrixXd x);                // compute Jacobian of measurement model
     MatrixXd h_imu(MatrixXd x);
     MatrixXd compute_jacobian_H_imu(MatrixXd x);
+    void initializeFaultDiagnosis();
+    void updateFaultModel();
+    void extractFeatures(VectorXd& features);
+    bool detectFault(const VectorXd& features, int& fault_type, double& confidence);
+    void logisticRegressionUpdate(const VectorXd& features, int label);
+    Vector3d calculateDisturbanceStats(const std::deque<Vector3d>& buffer);
+    void publishFaultDiagnosis(int fault_type, double confidence);
+    void saveFaultModel(const std::string& filename);
+    void loadFaultModel(const std::string& filename);
 };
 
 #endif

@@ -89,6 +89,37 @@ WAMV_MPC::WAMV_MPC()
     M_values << 180, 180, 446;
     M = M_values.asDiagonal();
     invM = M.inverse();
+
+    // Initialize fault diagnosis parameters
+    this->declare_parameter<int>("window_size", 50);
+    this->declare_parameter<double>("learning_rate", 0.01);
+    this->declare_parameter<double>("lambda", 0.001);
+    this->declare_parameter<double>("wx_threshold", 5.0);
+    this->declare_parameter<double>("wy_threshold", 5.0);
+    this->declare_parameter<double>("wpsi_threshold", 5.0);
+    this->declare_parameter<int>("detection_count_threshold", 5);
+    this->declare_parameter<double>("detect_threshold", 0.7);
+    
+    this->get_parameter("window_size", window_size);
+    this->get_parameter("wx_threshold", wx_threshold);
+    this->get_parameter("wy_threshold", wy_threshold);
+    this->get_parameter("wpsi_threshold", wpsi_threshold);
+    this->get_parameter("detection_count_threshold", detection_count_threshold);
+    
+    // Initialize fault diagnosis publishers
+    fault_diagnosis_pub = this->create_publisher<std_msgs::msg::String>(
+        "/wamv/fault_diagnosis", 10);
+    fault_features_pub = this->create_publisher<std_msgs::msg::Float64MultiArray>(
+        "/wamv/fault_features", 10);
+    
+    // Initialize fault diagnosis model
+    initializeFaultDiagnosis();
+    
+    // Initialize previous thruster commands
+    prev_Tp = 0.0;
+    prev_Ts = 0.0;
+    prev_delta_p = 0.0;
+    prev_delta_s = 0.0;
 }
 
 // subscribe pos and vel
@@ -362,10 +393,17 @@ void WAMV_MPC::solve()
 
     // ocp_nlp_out_get(mpc_capsule->nlp_config, mpc_capsule->nlp_dims, mpc_capsule->nlp_out, 0, "u", (void *)acados_out.u0);
 
-    acados_out.u0[0] = 0;
-    acados_out.u0[1] = 0;
-    acados_out.u0[2] = 0;
-    acados_out.u0[3] = 0;
+    acados_out.u0[0] = 200;
+    acados_out.u0[1] = 200;
+    acados_out.u0[2] = 1.57;
+    acados_out.u0[3] = 1.57;
+    // if(testfd_counter < 300){
+    //     publish_cin(acados_out.u0[0], acados_out.u0[1], acados_out.u0[2], acados_out.u0[3]);
+    //     testfd_counter++;
+    // }
+    // else{
+    //     publish_cin(0, 0, acados_out.u0[2], acados_out.u0[3]);
+    // }
     publish_cin(acados_out.u0[0], acados_out.u0[1], acados_out.u0[2], acados_out.u0[3]);
     
     solver_param.Tp_pre = acados_out.u0[0];
@@ -375,7 +413,40 @@ void WAMV_MPC::solve()
 
     double current_time = rclcpp::Clock(RCL_SYSTEM_TIME).now().seconds();
     double z[4];
-        ocp_nlp_out_get(mpc_capsule->nlp_config, mpc_capsule->nlp_dims, mpc_capsule->nlp_out, 0, "z", z);
+    ocp_nlp_out_get(mpc_capsule->nlp_config, mpc_capsule->nlp_dims, mpc_capsule->nlp_out, 0, "z", z);
+    std::string fault_status;
+    std::string fault_color;
+    
+    if (fault_detected) {
+        switch (current_fault_type) {
+            case NO_FAULT:
+                fault_status = "NO_FAULT";
+                fault_color = "\033[32m"; // Green
+                break;
+            case LEFT_THRUST_FAILURE:
+                fault_status = "LEFT_THRUST_FAILURE";
+                fault_color = "\033[31m"; // Red
+                break;
+            case RIGHT_THRUST_FAILURE:
+                fault_status = "RIGHT_THRUST_FAILURE";
+                fault_color = "\033[31m"; // Red
+                break;
+            case LEFT_ANGLE_FAILURE:
+                fault_status = "LEFT_ANGLE_FAILURE";
+                fault_color = "\033[33m"; // Yellow
+                break;
+            case RIGHT_ANGLE_FAILURE:
+                fault_status = "RIGHT_ANGLE_FAILURE";
+                fault_color = "\033[33m"; // Yellow
+                break;
+            default:
+                fault_status = "UNKNOWN_FAULT";
+                fault_color = "\033[35m"; // Magenta
+        }
+    } else {
+        fault_status = "NORMAL";
+        fault_color = "\033[32m"; // Green
+    }
     if(cout_counter > 2){
         std::cout << "---------------------------------------------------------------------------------------------------------------------" << std::endl;
         std::cout << "ref_x:    " << acados_in.yref[0][0] << "\tref_y:   " << acados_in.yref[0][1] << "\tref_yaw:    " << acados_in.yref[0][2] << std::endl;
@@ -390,6 +461,12 @@ void WAMV_MPC::solve()
         std::cout << "z:  " << "  Tp_z:  " << z[0] << "  Ts_z:  " << z[1] << "  delta_p_z:  " << z[2] << "  delta_s_z:  " << z[3] << std::endl;
         std::cout << "solve_time: "<< acados_out.cpu_time << "\tkkt_res: " << acados_out.kkt_res << "\tacados_status: " << acados_out.status << std::endl;
         std::cout << "relative_time: " << std::fixed << (current_time - start_time) << std::endl;
+        // Add the fault diagnosis status:
+        std::cout << fault_color << "FAULT STATUS: " << fault_status;
+        if (fault_detected) {
+            std::cout << " (Confidence: " << std::fixed << std::setprecision(2) << fault_detection_confidence * 100.0 << "%)";
+        }
+        std::cout << "\033[0m" << std::endl; // Reset color
         std::cout << "---------------------------------------------------------------------------------------------------------------------" << std::endl;
         cout_counter = 0;
     }
@@ -400,9 +477,18 @@ void WAMV_MPC::solve()
 
 void WAMV_MPC::publish_cin(double Tp_mpc, double Ts_mpc, double delta_p_mpc, double delta_s_mpc)
 {
+    // if (iteration_count % 20 == 0) {
+        // RCLCPP_INFO(this->get_logger(), "Iteration: %zu, Tp_mpc: %f", iteration_count, Tp_mpc);
+    // }
 
     // publish control inputs
-    Tp.data = Tp_mpc;
+    if (iteration_count < fault_trigger) {
+        Tp.data = Tp_mpc;  // Normal operation
+    } else {
+        Tp.data = 0.0;     // Port thruster fails (no force)
+        RCLCPP_INFO(this->get_logger(), "Simulating port thruster force failure at iteration %zu", iteration_count);
+    }
+    iteration_count++;
     left_thrust_cmd_pub->publish(Tp);
 
     Ts.data = Ts_mpc;
@@ -694,3 +780,344 @@ MatrixXd WAMV_MPC::compute_jacobian_H_imu(MatrixXd x) {
     }
     return H;
 }
+
+void WAMV_MPC::initializeFaultDiagnosis() 
+{
+    // Initialize fault detection parameters
+    detection_counter = 0;
+    fault_detected = false;
+    current_fault_type = NO_FAULT;
+    fault_detection_confidence = 0.0;
+    
+    // Initialize the online logistic regression model
+    fault_model.feature_dim = 9; // We'll use 9 features for fault detection
+    fault_model.weights = MatrixXd::Zero(fault_model.feature_dim, 5); // 5 classes (no fault + 4 fault types)
+    fault_model.bias = 0.0;
+    fault_model.learning_rate = 0.01;
+    fault_model.lambda = 0.001;
+    fault_model.buffer_size = window_size;
+    fault_model.detect_threshold = 0.7;
+    
+    // Initialize the disturbance buffer
+    dist_buffer.clear();
+    for (int i = 0; i < window_size; i++) {
+        dist_buffer.push_back(Vector3d::Zero());
+    }
+    
+    // Try to load a pre-trained model if available
+    try {
+        loadFaultModel("fault_model.csv");
+        RCLCPP_INFO(this->get_logger(), "Loaded pre-trained fault diagnosis model");
+    } catch (...) {
+        RCLCPP_INFO(this->get_logger(), "No pre-trained model found, starting with a new model");
+    }
+}
+
+// Update the fault model with new disturbance information
+void WAMV_MPC::updateFaultModel() 
+{
+    // Add the current disturbance to the buffer
+    Vector3d current_dist(esti_x[6], esti_x[7], esti_x[8]);
+    dist_buffer.push_back(current_dist);
+    if (dist_buffer.size() > static_cast<size_t>(window_size)) {
+        dist_buffer.pop_front();
+    }
+    
+    // Extract features
+    VectorXd features(fault_model.feature_dim);
+    extractFeatures(features);
+    
+    // Publish features for debugging/monitoring
+    auto feature_msg = std::make_unique<std_msgs::msg::Float64MultiArray>();
+    feature_msg->data.resize(fault_model.feature_dim);
+    for (int i = 0; i < fault_model.feature_dim; i++) {
+        feature_msg->data[i] = features[i];
+    }
+    fault_features_pub->publish(*feature_msg);
+    
+    // Detect faults
+    int detected_fault;
+    double confidence;
+    bool is_fault = detectFault(features, detected_fault, confidence);
+    
+    // Update detection counter and fault status
+    if (is_fault) {
+        if (detected_fault == current_fault_type) {
+            detection_counter++;
+        } else {
+            // Reset counter for new fault type
+            detection_counter = 1;
+            current_fault_type = detected_fault;
+        }
+    } else {
+        detection_counter = 0;
+        current_fault_type = NO_FAULT;
+    }
+    
+    // Confirm fault if detection counter reaches threshold
+    if (detection_counter >= detection_count_threshold) {
+        if (!fault_detected || current_fault_type != NO_FAULT) {
+            fault_detected = true;
+            fault_detection_confidence = confidence;
+            publishFaultDiagnosis(current_fault_type, confidence);
+        }
+    } else if (fault_detected && detection_counter == 0) {
+        // Reset fault if counter goes to zero
+        fault_detected = false;
+        publishFaultDiagnosis(NO_FAULT, 0.0);
+    }
+    
+    // If we have ground truth information, update the model (supervised learning)
+    // For demonstration, we'll just check the thruster commands to infer faults
+    // In a real system, you'd want a more sophisticated approach
+    int true_label = NO_FAULT;
+    
+    // Simple rule-based ground truth - compare current and previous commands
+    // This is naive and should be replaced with actual fault detection logic
+    if (abs(Tp.data) < 0.1 && abs(prev_Tp) > 10.0) {
+        true_label = LEFT_THRUST_FAILURE;
+    } else if (abs(Ts.data) < 0.1 && abs(prev_Ts) > 10.0) {
+        true_label = RIGHT_THRUST_FAILURE;
+    } else if (abs(delta_p.data - prev_delta_p) < 0.01 && abs(prev_delta_p) > 0.1) {
+        true_label = LEFT_ANGLE_FAILURE;
+    } else if (abs(delta_s.data - prev_delta_s) < 0.01 && abs(prev_delta_s) > 0.1) {
+        true_label = RIGHT_ANGLE_FAILURE;
+    }
+    
+    // Update the model with the ground truth label
+    if (true_label != NO_FAULT) {
+        logisticRegressionUpdate(features, true_label);
+    }
+    
+    // Store current commands for next iteration
+    prev_Tp = Tp.data;
+    prev_Ts = Ts.data;
+    prev_delta_p = delta_p.data;
+    prev_delta_s = delta_s.data;
+}
+
+// Extract features from the disturbance buffer
+void WAMV_MPC::extractFeatures(VectorXd& features) 
+{
+    // Calculate statistics on the disturbance buffer
+    Vector3d stats = calculateDisturbanceStats(dist_buffer);
+    
+    // Fill the feature vector with relevant features
+    // Using mean, variance, trend, and correlations
+    
+    // Basic statistics (mean and standard deviation)
+    features[0] = esti_x[6];  // Current w_x
+    features[1] = esti_x[7];  // Current w_y
+    features[2] = esti_x[8];  // Current w_psi
+    
+    // Mean and standard deviation from buffer
+    features[3] = stats[0];   // Mean of w_x
+    features[4] = stats[1];   // Mean of w_y
+    features[5] = stats[2];   // Mean of w_psi
+    
+    // Ratios and relationships between disturbance components
+    features[6] = esti_x[6] / (std::abs(esti_x[7]) + 1e-5);  // Ratio of w_x to w_y
+    features[7] = esti_x[7] / (std::abs(esti_x[6]) + 1e-5);  // Ratio of w_y to w_x
+    features[8] = esti_x[8] / (std::sqrt(esti_x[6]*esti_x[6] + esti_x[7]*esti_x[7]) + 1e-5); // Ratio of w_psi to linear disturbances
+}
+
+// Detect faults based on extracted features
+bool WAMV_MPC::detectFault(const VectorXd& features, int& fault_type, double& confidence) 
+{
+    // Simple approach: check if any disturbance component exceeds its threshold
+    double wx = features[0];
+    double wy = features[1];
+    double wpsi = features[2];
+    
+    // Simple rule-based detection
+    if (std::abs(wx) > wx_threshold || std::abs(wy) > wy_threshold || std::abs(wpsi) > wpsi_threshold) {
+        // Determine most likely fault type using logistic regression
+        
+        // Calculate scores for each class (softmax)
+        VectorXd scores = VectorXd::Zero(5); // 5 classes
+        for (int i = 0; i < 5; i++) {
+            scores[i] = fault_model.weights.col(i).dot(features) + fault_model.bias;
+        }
+        
+        // Apply softmax to get probabilities
+        double max_score = scores.maxCoeff();
+        scores = scores.array() - max_score; // For numerical stability
+        scores = scores.array().exp();
+        double sum = scores.sum();
+        scores = scores / sum;
+        
+        // Get the class with highest probability
+        int max_class = 0;
+        double max_prob = scores[0];
+        for (int i = 1; i < 5; i++) {
+            if (scores[i] > max_prob) {
+                max_prob = scores[i];
+                max_class = i;
+            }
+        }
+        
+        // Check if probability exceeds threshold
+        if (max_prob > fault_model.detect_threshold && max_class != NO_FAULT) {
+            fault_type = max_class;
+            confidence = max_prob;
+            return true;
+        }
+    }
+    
+    fault_type = NO_FAULT;
+    confidence = 0.0;
+    return false;
+}
+
+// Update the logistic regression model
+void WAMV_MPC::logisticRegressionUpdate(const VectorXd& features, int label) 
+{
+    // Store data in buffers
+    fault_model.feature_buffer.push_back(features);
+    fault_model.label_buffer.push_back(label);
+    
+    // Ensure buffer doesn't exceed max size
+    if (fault_model.feature_buffer.size() > static_cast<size_t>(fault_model.buffer_size)) {
+        fault_model.feature_buffer.pop_front();
+        fault_model.label_buffer.pop_front();
+    }
+    
+    // Skip if we don't have enough data
+    if (fault_model.feature_buffer.size() < static_cast<size_t>(10)) {
+        return;
+    }
+    
+    // Implement stochastic gradient descent update for logistic regression
+    // This is a simplified multi-class logistic regression using one-vs-all approach
+    
+    // Create one-hot encoded label
+    VectorXd one_hot = VectorXd::Zero(5);
+    one_hot[label] = 1.0;
+    
+    // Calculate predictions (softmax)
+    VectorXd scores = VectorXd::Zero(5);
+    for (int i = 0; i < 5; i++) {
+        scores[i] = fault_model.weights.col(i).dot(features) + fault_model.bias;
+    }
+    
+    // Apply softmax
+    double max_score = scores.maxCoeff();
+    scores = scores.array() - max_score; // For numerical stability
+    scores = scores.array().exp();
+    double sum = scores.sum();
+    scores = scores / sum;
+    
+    // Calculate gradient and update weights
+    for (int i = 0; i < 5; i++) {
+        VectorXd gradient = features * (scores[i] - one_hot[i]);
+        fault_model.weights.col(i) -= fault_model.learning_rate * 
+                                      (gradient + fault_model.lambda * fault_model.weights.col(i));
+    }
+    
+    // Periodically save the model
+    static int update_count = 0;
+    update_count++;
+    if (update_count % 1000 == 0) {
+        saveFaultModel("fault_model.csv");
+    }
+}
+
+// Calculate statistics on the disturbance buffer
+Vector3d WAMV_MPC::calculateDisturbanceStats(const std::deque<Vector3d>& buffer) 
+{
+    Vector3d mean = Vector3d::Zero();
+    
+    // Calculate mean
+    for (const auto& dist : buffer) {
+        mean += dist;
+    }
+    mean /= buffer.size();
+    
+    return mean;
+}
+
+// Publish fault diagnosis results
+void WAMV_MPC::publishFaultDiagnosis(int fault_type, double confidence) 
+{
+    auto message = std::make_unique<std_msgs::msg::String>();
+    std::string fault_str;
+    
+    switch (fault_type) {
+        case NO_FAULT:
+            fault_str = "NO_FAULT";
+            break;
+        case LEFT_THRUST_FAILURE:
+            fault_str = "LEFT_THRUST_FAILURE";
+            break;
+        case RIGHT_THRUST_FAILURE:
+            fault_str = "RIGHT_THRUST_FAILURE";
+            break;
+        case LEFT_ANGLE_FAILURE:
+            fault_str = "LEFT_ANGLE_FAILURE";
+            break;
+        case RIGHT_ANGLE_FAILURE:
+            fault_str = "RIGHT_ANGLE_FAILURE";
+            break;
+        default:
+            fault_str = "UNKNOWN_FAULT";
+    }
+    
+    message->data = "Fault: " + fault_str + " (Confidence: " + 
+                   std::to_string(confidence * 100.0) + "%)";
+    fault_diagnosis_pub->publish(*message);
+    
+    // RCLCPP_INFO(this->get_logger(), "Fault diagnosis: %s (%.2f%%)", 
+    //            fault_str.c_str(), confidence * 100.0);
+}
+
+// Save the fault model to a file
+void WAMV_MPC::saveFaultModel(const std::string& filename) 
+{
+    std::ofstream file(filename);
+    if (file.is_open()) {
+        // Save weights
+        for (int i = 0; i < fault_model.weights.rows(); i++) {
+            for (int j = 0; j < fault_model.weights.cols(); j++) {
+                file << fault_model.weights(i, j);
+                if (j < fault_model.weights.cols() - 1) {
+                    file << ",";
+                }
+            }
+            file << std::endl;
+        }
+        file.close();
+        RCLCPP_INFO(this->get_logger(), "Saved fault model to %s", filename.c_str());
+    } else {
+        RCLCPP_ERROR(this->get_logger(), "Failed to save fault model to %s", filename.c_str());
+    }
+}
+
+// Load the fault model from a file
+void WAMV_MPC::loadFaultModel(const std::string& filename) 
+{
+    std::ifstream file(filename);
+    if (file.is_open()) {
+        std::string line;
+        int row = 0;
+        
+        while (std::getline(file, line) && row < fault_model.weights.rows()) {
+            std::stringstream ss(line);
+            std::string cell;
+            int col = 0;
+            
+            while (std::getline(ss, cell, ',') && col < fault_model.weights.cols()) {
+                fault_model.weights(row, col) = std::stod(cell);
+                col++;
+            }
+            row++;
+        }
+        
+        file.close();
+        RCLCPP_INFO(this->get_logger(), "Loaded fault model from %s", filename.c_str());
+    } else {
+        RCLCPP_WARN(this->get_logger(), "Failed to load fault model from %s", filename.c_str());
+        throw std::runtime_error("Failed to load fault model");
+    }
+}
+
+

@@ -184,35 +184,35 @@ def plot_data(error_pose_x, error_pose_y, error_pose_yaw, error_pose_time,
     #     ax.set_xlabel("Time (s)")
     # plt.tight_layout()
 
-    # # Plot Figure 3: Control Inputs
-    # fig3, axs3 = plt.subplots(2, 1, figsize=(10, 6))
-    # fig3.suptitle('Control Inputs')
+    # Plot Figure 3: Control Inputs
+    fig3, axs3 = plt.subplots(2, 1, figsize=(10, 6))
+    fig3.suptitle('Control Inputs')
 
-    # axs3[0].plot(control_inputs_time, left_thrust_angle, 'r-', label="Left Thrust Angle")
-    # axs3[0].plot(control_inputs_time, right_thrust_angle, 'b-', label="Right Thrust Angle")
-    # axs3[0].legend()
-    # axs3[0].set_ylabel("Thrust Angle (rad)")
+    axs3[0].plot(control_inputs_time, left_thrust_angle, 'r-', label="Left Thrust Angle")
+    axs3[0].plot(control_inputs_time, right_thrust_angle, 'b-', label="Right Thrust Angle")
+    axs3[0].legend()
+    axs3[0].set_ylabel("Thrust Angle (rad)")
 
-    # axs3[1].plot(control_inputs_time, left_thrust_cmd, 'r-', label="Left Thrust Command")
-    # axs3[1].plot(control_inputs_time, right_thrust_cmd, 'b-', label="Right Thrust Command")
-    # axs3[1].legend()
-    # axs3[1].set_ylabel("Thrust Command")
+    axs3[1].plot(control_inputs_time, left_thrust_cmd, 'r-', label="Left Thrust Command")
+    axs3[1].plot(control_inputs_time, right_thrust_cmd, 'b-', label="Right Thrust Command")
+    axs3[1].legend()
+    axs3[1].set_ylabel("Thrust Command")
 
-    # for ax in axs3:
-    #     ax.set_xlabel("Time (s)")
-    # plt.tight_layout()
+    for ax in axs3:
+        ax.set_xlabel("Time (s)")
+    plt.tight_layout()
 
     # Plot Figure 4: Trajectory in XY Plane
-    # fig4, ax4 = plt.subplots(figsize=(10, 8))
-    # fig4.suptitle('Trajectory in XY Plane')
+    fig4, ax4 = plt.subplots(figsize=(10, 8))
+    fig4.suptitle('Trajectory in XY Plane')
 
-    # ax4.plot(ref_pose_x, ref_pose_y, 'r-', label="Reference Trajectory")
-    # ax4.plot(pose_gt_x, pose_gt_y, 'b-', label="MPC Trajectory")
-    # ax4.set_xlabel("X Position")
-    # ax4.set_ylabel("Y Position")
-    # ax4.legend()
+    ax4.plot(ref_pose_x, ref_pose_y, 'r-', label="Reference Trajectory")
+    ax4.plot(pose_gt_x, pose_gt_y, 'b-', label="MPC Trajectory")
+    ax4.set_xlabel("X Position")
+    ax4.set_ylabel("Y Position")
+    ax4.legend()
 
-    # plt.tight_layout()
+    plt.tight_layout()
     # plt.show()
 
     # Plot Figure 5: ekf states
@@ -286,7 +286,7 @@ def plot_data(error_pose_x, error_pose_y, error_pose_yaw, error_pose_time,
 
 def main():
     # Specify your bag folder path
-    bag_dir = 'forward0316_5'  # Adjust this to your actual path, e.g., '/path/to/forward0303_0'
+    bag_dir = 'forward0317_2'  # Adjust this to your actual path, e.g., '/path/to/forward0303_0'
 
     # Initialize rclpy for message deserialization
     rclpy.init()

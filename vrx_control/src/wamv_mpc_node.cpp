@@ -14,29 +14,20 @@ int main(int argc, char **argv)
     // Counter to throttle solve() to 20 Hz
     int iteration_count = 0;
     const int solve_frequency = 5; // 100 Hz / 20 Hz = 5 iterations
-
-    // Set start time and duration for the operation
-    // rclcpp::Time start_time = rclcpp::Clock().now();
-    // rclcpp::Duration duration(50.0); // Set the desired duration to 50 seconds
-
-    // Delay for 5 seconds before starting the loop
-    // rclcpp::sleep_for(std::chrono::seconds(5));
+    const int fault_diagnosis_frequency = 10; // 100 Hz / 10 Hz = 10 iterations
 
     // Main loop for ROS 2 node
     while (rclcpp::ok()) {
-        // rclcpp::Time current_time = rclcpp::Clock().now();
-        // rclcpp::Duration elapsed_time = current_time - start_time;
-
-        // Optional: Check if elapsed time exceeds the desired duration
-        // if (elapsed_time.seconds() >= duration.seconds()) {
-        //     RCLCPP_INFO(wm_node->get_logger(), "Reached 50 seconds. Stopping the program.");
-        //     break;
-        // }
-
         // Call solve() if the condition is met
         if (wm_node->is_start == true) {
             wm_node->EKF();
-            // wm_node->solve();
+            
+            // Run fault diagnosis at 10 Hz
+            if (iteration_count % fault_diagnosis_frequency == 0) {
+                wm_node->updateFaultModel();
+            }
+            
+            // Run MPC at 20 Hz
             if (iteration_count % solve_frequency == 0) {
                 wm_node->solve();
             }
