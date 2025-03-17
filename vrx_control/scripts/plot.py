@@ -286,7 +286,7 @@ def plot_data(error_pose_x, error_pose_y, error_pose_yaw, error_pose_time,
 
 def main():
     # Specify your bag folder path
-    bag_dir = 'forward0317_2'  # Adjust this to your actual path, e.g., '/path/to/forward0303_0'
+    bag_dir = 'forward0316_2'  # Adjust this to your actual path, e.g., '/path/to/forward0303_0'
 
     # Initialize rclpy for message deserialization
     rclpy.init()

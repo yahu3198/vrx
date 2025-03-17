@@ -1,7 +1,10 @@
 #include <vrx_control/wamv_mpc.h>
 
 WAMV_MPC::WAMV_MPC() 
-: Node("wamv_mpc_node")
+: Node("wamv_mpc_node"),
+  wpsi_coefficient(0.05),      // Initial guess for the coefficient
+  calibration_counter(0),
+  calibration_enabled(true)    // Enable calibration by default
 {
     // Declare parameters with default values
     this->declare_parameter<int>("read_wrench", 0);
@@ -94,12 +97,12 @@ WAMV_MPC::WAMV_MPC()
     this->declare_parameter<int>("window_size", 50);
     this->declare_parameter<double>("learning_rate", 0.01);
     this->declare_parameter<double>("lambda", 0.001);
-    this->declare_parameter<double>("wx_threshold", 5.0);
-    this->declare_parameter<double>("wy_threshold", 5.0);
-    this->declare_parameter<double>("wpsi_threshold", 5.0);
-    this->declare_parameter<int>("detection_count_threshold", 5);
-    this->declare_parameter<double>("detect_threshold", 0.7);
-    
+    this->declare_parameter<double>("wx_threshold", 15.0);     // Increased
+    this->declare_parameter<double>("wy_threshold", 15.0);     // Increased
+    this->declare_parameter<double>("wpsi_threshold", 5.0);    // Reduced - more sensitive to yaw
+    this->declare_parameter<int>("detection_count_threshold", 2); // Lower for faster response
+    this->declare_parameter<double>("detect_threshold", 0.60); // Reduced for better sensitivity
+
     this->get_parameter("window_size", window_size);
     this->get_parameter("wx_threshold", wx_threshold);
     this->get_parameter("wy_threshold", wy_threshold);
@@ -111,6 +114,17 @@ WAMV_MPC::WAMV_MPC()
         "/wamv/fault_diagnosis", 10);
     fault_features_pub = this->create_publisher<std_msgs::msg::Float64MultiArray>(
         "/wamv/fault_features", 10);
+
+    // Add parameter for calibration
+    this->declare_parameter<bool>("calibration_enabled", true);
+    this->get_parameter("calibration_enabled", calibration_enabled);
+    
+    // Add publisher for the coefficient
+    wpsi_coefficient_pub = this->create_publisher<std_msgs::msg::Float64>(
+        "/wamv/wpsi_coefficient", 10);
+    
+    // Initialize calibration data with reserved capacity
+    calibration_data.reserve(1000);
     
     // Initialize fault diagnosis model
     initializeFaultDiagnosis();
@@ -783,6 +797,14 @@ MatrixXd WAMV_MPC::compute_jacobian_H_imu(MatrixXd x) {
 
 void WAMV_MPC::initializeFaultDiagnosis() 
 {
+    // Print initial configuration for debugging
+    std::cout << "\033[1;32m" << "Initializing Fault Diagnosis System" << "\033[0m" << std::endl;
+    std::cout << "\033[1;32m" << "  window_size: " << window_size << "\033[0m" << std::endl;
+    std::cout << "\033[1;32m" << "  wx_threshold: " << wx_threshold << "\033[0m" << std::endl;
+    std::cout << "\033[1;32m" << "  wy_threshold: " << wy_threshold << "\033[0m" << std::endl;
+    std::cout << "\033[1;32m" << "  wpsi_threshold: " << wpsi_threshold << "\033[0m" << std::endl;
+    std::cout << "\033[1;32m" << "  detection_count_threshold: " << detection_count_threshold << "\033[0m" << std::endl;
+    
     // Initialize fault detection parameters
     detection_counter = 0;
     fault_detected = false;
@@ -790,13 +812,13 @@ void WAMV_MPC::initializeFaultDiagnosis()
     fault_detection_confidence = 0.0;
     
     // Initialize the online logistic regression model
-    fault_model.feature_dim = 9; // We'll use 9 features for fault detection
+    fault_model.feature_dim = 9; // Using 9 features for fault detection
     fault_model.weights = MatrixXd::Zero(fault_model.feature_dim, 5); // 5 classes (no fault + 4 fault types)
     fault_model.bias = 0.0;
     fault_model.learning_rate = 0.01;
     fault_model.lambda = 0.001;
     fault_model.buffer_size = window_size;
-    fault_model.detect_threshold = 0.7;
+    fault_model.detect_threshold = 0.65;  // Slightly lower threshold for more sensitivity
     
     // Initialize the disturbance buffer
     dist_buffer.clear();
@@ -808,8 +830,29 @@ void WAMV_MPC::initializeFaultDiagnosis()
     try {
         loadFaultModel("fault_model.csv");
         RCLCPP_INFO(this->get_logger(), "Loaded pre-trained fault diagnosis model");
+        std::cout << "\033[1;32m" << "Loaded pre-trained fault diagnosis model" << "\033[0m" << std::endl;
     } catch (...) {
         RCLCPP_INFO(this->get_logger(), "No pre-trained model found, starting with a new model");
+        std::cout << "\033[1;32m" << "No pre-trained model found, starting with a new model" << "\033[0m" << std::endl;
+        
+        // Initialize weights with some basic patterns to help early detection
+        // These will be refined with learning, but give a starting point
+        
+        // For LEFT_THRUST_FAILURE: positive wpsi (turning right)
+        fault_model.weights(2, LEFT_THRUST_FAILURE) = 2.0;  // Strong positive weight for wpsi
+        fault_model.weights(8, LEFT_THRUST_FAILURE) = 0.5;  // Positive slope
+
+        // For RIGHT_THRUST_FAILURE: negative wpsi (turning left)
+        fault_model.weights(2, RIGHT_THRUST_FAILURE) = -2.0; // Strong negative weight for wpsi
+        fault_model.weights(8, RIGHT_THRUST_FAILURE) = -0.5; // Negative slope
+        
+        // For LEFT_ANGLE_FAILURE: moderate wpsi, significant wx
+        fault_model.weights(0, LEFT_ANGLE_FAILURE) = 1.0;  // wx current value
+        fault_model.weights(2, LEFT_ANGLE_FAILURE) = 0.5;  // wpsi current value
+        
+        // For RIGHT_ANGLE_FAILURE: opposite of left
+        fault_model.weights(0, RIGHT_ANGLE_FAILURE) = -1.0; // wx current value
+        fault_model.weights(2, RIGHT_ANGLE_FAILURE) = -0.5; // wpsi current value
     }
 }
 
@@ -827,7 +870,7 @@ void WAMV_MPC::updateFaultModel()
     VectorXd features(fault_model.feature_dim);
     extractFeatures(features);
     
-    // Publish features for debugging/monitoring
+    // Publish features for debugging
     auto feature_msg = std::make_unique<std_msgs::msg::Float64MultiArray>();
     feature_msg->data.resize(fault_model.feature_dim);
     for (int i = 0; i < fault_model.feature_dim; i++) {
@@ -835,58 +878,83 @@ void WAMV_MPC::updateFaultModel()
     }
     fault_features_pub->publish(*feature_msg);
     
-    // Detect faults
+    // Direct command check for rapid detection
+    if (std::abs(Tp.data) < 5.0 && std::abs(prev_Tp) > 50.0) {
+        // This is a definite LEFT thruster failure
+        std::cout << "\033[1;31m" << "DIRECT LEFT THRUST FAILURE DETECTION: Tp dropped from " 
+                  << prev_Tp << " to " << Tp.data << "\033[0m" << std::endl;
+        fault_detected = true;
+        current_fault_type = LEFT_THRUST_FAILURE;
+        fault_detection_confidence = 0.95;
+        publishFaultDiagnosis(LEFT_THRUST_FAILURE, 0.95);
+        
+        // Immediately update prev values and return
+        prev_Tp = Tp.data;
+        prev_Ts = Ts.data;
+        prev_delta_p = delta_p.data;
+        prev_delta_s = delta_s.data;
+        return;
+    }
+    
+    if (std::abs(Ts.data) < 5.0 && std::abs(prev_Ts) > 50.0) {
+        // This is a definite RIGHT thruster failure
+        std::cout << "\033[1;31m" << "DIRECT RIGHT THRUST FAILURE DETECTION: Ts dropped from " 
+                  << prev_Ts << " to " << Ts.data << "\033[0m" << std::endl;
+        fault_detected = true;
+        current_fault_type = RIGHT_THRUST_FAILURE;
+        fault_detection_confidence = 0.95;
+        publishFaultDiagnosis(RIGHT_THRUST_FAILURE, 0.95);
+        
+        // Immediately update prev values and return
+        prev_Tp = Tp.data;
+        prev_Ts = Ts.data;
+        prev_delta_p = delta_p.data;
+        prev_delta_s = delta_s.data;
+        return;
+    }
+    
+    // Normal pattern-based detection
     int detected_fault;
     double confidence;
     bool is_fault = detectFault(features, detected_fault, confidence);
     
-    // Update detection counter and fault status
+    // State machine for fault status
+    static int same_fault_counter = 0;
+    static int no_fault_counter = 0;
+    
     if (is_fault) {
+        // Check if it's the same fault as before
         if (detected_fault == current_fault_type) {
-            detection_counter++;
+            same_fault_counter++;
         } else {
-            // Reset counter for new fault type
-            detection_counter = 1;
+            same_fault_counter = 1;
             current_fault_type = detected_fault;
         }
-    } else {
-        detection_counter = 0;
-        current_fault_type = NO_FAULT;
-    }
-    
-    // Confirm fault if detection counter reaches threshold
-    if (detection_counter >= detection_count_threshold) {
-        if (!fault_detected || current_fault_type != NO_FAULT) {
-            fault_detected = true;
-            fault_detection_confidence = confidence;
-            publishFaultDiagnosis(current_fault_type, confidence);
+        
+        // After enough consistent detections, confirm the fault
+        if (same_fault_counter >= detection_count_threshold) {
+            if (!fault_detected || current_fault_type != detected_fault) {
+                fault_detected = true;
+                current_fault_type = detected_fault;
+                fault_detection_confidence = confidence;
+                publishFaultDiagnosis(current_fault_type, confidence);
+            }
         }
-    } else if (fault_detected && detection_counter == 0) {
-        // Reset fault if counter goes to zero
-        fault_detected = false;
-        publishFaultDiagnosis(NO_FAULT, 0.0);
-    }
-    
-    // If we have ground truth information, update the model (supervised learning)
-    // For demonstration, we'll just check the thruster commands to infer faults
-    // In a real system, you'd want a more sophisticated approach
-    int true_label = NO_FAULT;
-    
-    // Simple rule-based ground truth - compare current and previous commands
-    // This is naive and should be replaced with actual fault detection logic
-    if (abs(Tp.data) < 0.1 && abs(prev_Tp) > 10.0) {
-        true_label = LEFT_THRUST_FAILURE;
-    } else if (abs(Ts.data) < 0.1 && abs(prev_Ts) > 10.0) {
-        true_label = RIGHT_THRUST_FAILURE;
-    } else if (abs(delta_p.data - prev_delta_p) < 0.01 && abs(prev_delta_p) > 0.1) {
-        true_label = LEFT_ANGLE_FAILURE;
-    } else if (abs(delta_s.data - prev_delta_s) < 0.01 && abs(prev_delta_s) > 0.1) {
-        true_label = RIGHT_ANGLE_FAILURE;
-    }
-    
-    // Update the model with the ground truth label
-    if (true_label != NO_FAULT) {
-        logisticRegressionUpdate(features, true_label);
+        
+        no_fault_counter = 0;
+    } else {
+        // No fault detected
+        same_fault_counter = 0;
+        no_fault_counter++;
+        
+        // Need more consecutive "no fault" detections to clear a fault
+        if (no_fault_counter >= detection_count_threshold * 3) {
+            if (fault_detected) {
+                fault_detected = false;
+                current_fault_type = NO_FAULT;
+                publishFaultDiagnosis(NO_FAULT, 0.0);
+            }
+        }
     }
     
     // Store current commands for next iteration
@@ -900,70 +968,321 @@ void WAMV_MPC::updateFaultModel()
 void WAMV_MPC::extractFeatures(VectorXd& features) 
 {
     // Calculate statistics on the disturbance buffer
-    Vector3d stats = calculateDisturbanceStats(dist_buffer);
+    Vector3d mean = Vector3d::Zero();
+    Vector3d variance = Vector3d::Zero();
+    Vector3d max_val = Vector3d::Zero();
+    Vector3d min_val = Vector3d::Zero();
     
-    // Fill the feature vector with relevant features
-    // Using mean, variance, trend, and correlations
+    // Initialize min/max values
+    if (!dist_buffer.empty()) {
+        min_val = max_val = dist_buffer.front();
+    }
     
-    // Basic statistics (mean and standard deviation)
+    // Calculate mean and find min/max
+    for (const auto& dist : dist_buffer) {
+        mean += dist;
+        
+        // Update max values
+        if (dist[0] > max_val[0]) max_val[0] = dist[0];
+        if (dist[1] > max_val[1]) max_val[1] = dist[1];
+        if (dist[2] > max_val[2]) max_val[2] = dist[2];
+        
+        // Update min values
+        if (dist[0] < min_val[0]) min_val[0] = dist[0];
+        if (dist[1] < min_val[1]) min_val[1] = dist[1];
+        if (dist[2] < min_val[2]) min_val[2] = dist[2];
+    }
+    mean /= dist_buffer.size();
+    
+    // Calculate variance
+    for (const auto& dist : dist_buffer) {
+        variance[0] += (dist[0] - mean[0]) * (dist[0] - mean[0]);
+        variance[1] += (dist[1] - mean[1]) * (dist[1] - mean[1]);
+        variance[2] += (dist[2] - mean[2]) * (dist[2] - mean[2]);
+    }
+    variance /= dist_buffer.size();
+    
+    // Calculate slope (trend) of disturbances over the window
+    Vector3d slope = Vector3d::Zero();
+    if (dist_buffer.size() >= 10) {
+        // Take average of first 5 and last 5 elements to reduce noise
+        Vector3d early_mean = Vector3d::Zero();
+        Vector3d late_mean = Vector3d::Zero();
+        
+        for (size_t i = 0; i < 5; i++) {
+            early_mean += dist_buffer[i];
+        }
+        early_mean /= 5;
+        
+        for (size_t i = dist_buffer.size() - 5; i < dist_buffer.size(); i++) {
+            late_mean += dist_buffer[i];
+        }
+        late_mean /= 5;
+        
+        // Calculate rate of change
+        slope = (late_mean - early_mean) / static_cast<double>(dist_buffer.size() - 5);
+    }
+    
+    // Enhanced features vector
     features[0] = esti_x[6];  // Current w_x
     features[1] = esti_x[7];  // Current w_y
     features[2] = esti_x[8];  // Current w_psi
     
-    // Mean and standard deviation from buffer
-    features[3] = stats[0];   // Mean of w_x
-    features[4] = stats[1];   // Mean of w_y
-    features[5] = stats[2];   // Mean of w_psi
+    // Mean of disturbances
+    features[3] = mean[0];    // Mean of w_x
+    features[4] = mean[1];    // Mean of w_y
+    features[5] = mean[2];    // Mean of w_psi
     
-    // Ratios and relationships between disturbance components
-    features[6] = esti_x[6] / (std::abs(esti_x[7]) + 1e-5);  // Ratio of w_x to w_y
-    features[7] = esti_x[7] / (std::abs(esti_x[6]) + 1e-5);  // Ratio of w_y to w_x
-    features[8] = esti_x[8] / (std::sqrt(esti_x[6]*esti_x[6] + esti_x[7]*esti_x[7]) + 1e-5); // Ratio of w_psi to linear disturbances
+    // Rate of change (slope)
+    features[6] = slope[0];   // Trend of w_x
+    features[7] = slope[1];   // Trend of w_y
+    features[8] = slope[2];   // Trend of w_psi
 }
 
 // Detect faults based on extracted features
 bool WAMV_MPC::detectFault(const VectorXd& features, int& fault_type, double& confidence) 
 {
-    // Simple approach: check if any disturbance component exceeds its threshold
+    // Get current disturbance values
     double wx = features[0];
     double wy = features[1];
     double wpsi = features[2];
     
-    // Simple rule-based detection
-    if (std::abs(wx) > wx_threshold || std::abs(wy) > wy_threshold || std::abs(wpsi) > wpsi_threshold) {
-        // Determine most likely fault type using logistic regression
-        
-        // Calculate scores for each class (softmax)
-        VectorXd scores = VectorXd::Zero(5); // 5 classes
+    // Get trend values
+    double wpsi_trend = features[8];
+    
+    // Print debug information periodically
+    static int debug_counter = 0;
+    if (debug_counter++ % 20 == 0) {
+        std::cout << "\033[1;35m" << "PATTERN DEBUG - wx: " << wx
+                  << ", wy: " << wy << ", wpsi: " << wpsi 
+                  << ", wpsi_trend: " << wpsi_trend 
+                  << ", Tp: " << Tp.data << ", Ts: " << Ts.data
+                  << "\033[0m" << std::endl;
+    }
+    
+    // Direct command-based detection (highest priority)
+    if (std::abs(Tp.data) < 5.0 && std::abs(prev_Tp) > 50.0) {
+        // This is a definite LEFT thruster failure
+        std::cout << "\033[1;31m" << "DIRECT LEFT THRUST FAILURE DETECTION: Tp dropped from " 
+                  << prev_Tp << " to " << Tp.data << "\033[0m" << std::endl;
+        fault_type = LEFT_THRUST_FAILURE;
+        confidence = 0.95;
+        return true;
+    }
+    
+    if (std::abs(Ts.data) < 5.0 && std::abs(prev_Ts) > 50.0) {
+        // This is a definite RIGHT thruster failure
+        std::cout << "\033[1;31m" << "DIRECT RIGHT THRUST FAILURE DETECTION: Ts dropped from " 
+                  << prev_Ts << " to " << Ts.data << "\033[0m" << std::endl;
+        fault_type = RIGHT_THRUST_FAILURE;
+        confidence = 0.95;
+        return true;
+    }
+    
+    // Store historical wpsi values to detect significant changes
+    static std::deque<double> wpsi_history;
+    wpsi_history.push_back(wpsi);
+    if (wpsi_history.size() > 30) { // 3 seconds at 10Hz
+        wpsi_history.pop_front();
+    }
+    
+    // Calculate the average of first 5 and last 5 values
+    double early_avg = 0.0;
+    double recent_avg = 0.0;
+    double wpsi_change = 0.0;
+    
+    if (wpsi_history.size() >= 10) {
         for (int i = 0; i < 5; i++) {
-            scores[i] = fault_model.weights.col(i).dot(features) + fault_model.bias;
+            early_avg += wpsi_history[i];
         }
+        early_avg /= 5.0;
         
-        // Apply softmax to get probabilities
-        double max_score = scores.maxCoeff();
-        scores = scores.array() - max_score; // For numerical stability
-        scores = scores.array().exp();
-        double sum = scores.sum();
-        scores = scores / sum;
+        for (size_t i = wpsi_history.size() - 5; i < wpsi_history.size(); i++) {
+            recent_avg += wpsi_history[i];
+        }
+        recent_avg /= 5.0;
         
-        // Get the class with highest probability
-        int max_class = 0;
-        double max_prob = scores[0];
-        for (int i = 1; i < 5; i++) {
-            if (scores[i] > max_prob) {
-                max_prob = scores[i];
-                max_class = i;
+        wpsi_change = recent_avg - early_avg;
+    }
+    
+    // Track command history
+    static std::deque<Vector4d> command_history;
+    Vector4d current_command(Tp.data, Ts.data, delta_p.data, delta_s.data);
+    command_history.push_back(current_command);
+    if (command_history.size() > 50) { // 5 seconds at 10Hz
+        command_history.pop_front();
+    }
+    
+    // Check if commands have been stable (indicating normal operation)
+    bool commands_stable = true;
+    if (command_history.size() > 10) {
+        Vector4d first_cmd = command_history.front();
+        for (const auto& cmd : command_history) {
+            if (std::abs(cmd[0] - first_cmd[0]) > 10.0 || 
+                std::abs(cmd[1] - first_cmd[1]) > 10.0 ||
+                std::abs(cmd[2] - first_cmd[2]) > 0.1 ||
+                std::abs(cmd[3] - first_cmd[3]) > 0.1) {
+                commands_stable = false;
+                break;
             }
-        }
-        
-        // Check if probability exceeds threshold
-        if (max_prob > fault_model.detect_threshold && max_class != NO_FAULT) {
-            fault_type = max_class;
-            confidence = max_prob;
-            return true;
         }
     }
     
+    // Clear detection thresholds
+    bool might_be_fault = false;
+    double left_thrust_score = 0.0;
+    double right_thrust_score = 0.0;
+    double left_angle_score = 0.0;
+    double right_angle_score = 0.0;
+    
+    // IMPORTANT: Calculate expected disturbance from commands
+    // In a normal operation, the yaw disturbance should be proportional to the differential thrust
+    // For the WAM-V, this is a simplified model of expected disturbance
+    double expected_wpsi = 0.0;
+    
+    // Only consider expected disturbance calculations for stable commands
+    if (commands_stable && command_history.size() > 20) {
+        // Calculate average thrust difference over recent history
+        double avg_thrust_diff = 0.0;
+        for (size_t i = command_history.size() - 10; i < command_history.size(); i++) {
+            avg_thrust_diff += (command_history[i][1] - command_history[i][0]); // Ts - Tp
+        }
+        avg_thrust_diff /= 10.0;
+        
+        // Simple linear model: expected disturbance proportional to thrust difference
+        // The coefficient should be tuned based on your specific vessel
+        double wpsi_coefficient = 0.05; // This needs calibration
+        expected_wpsi = avg_thrust_diff * wpsi_coefficient;
+        
+        // If commands are stable but disturbance differs significantly from expected,
+        // that may indicate a fault
+        double wpsi_deviation = wpsi - expected_wpsi;
+        if (std::abs(wpsi_deviation) > wpsi_threshold * 2.0) {
+            might_be_fault = true;
+            
+            // Determine which thruster is likely problematic based on the deviation
+            if (wpsi_deviation > 0) { // Actual wpsi is more positive than expected
+                left_thrust_score = 0.6;
+            } else { // Actual wpsi is more negative than expected
+                right_thrust_score = 0.6;
+            }
+        }
+    }
+    // For changing commands, we need to look at trends more than absolute values
+    else {
+        // Detection based on significant, sudden changes in wpsi
+        if (std::abs(wpsi_change) > 5.0) {
+            might_be_fault = true;
+            
+            if (wpsi_change > 0) { // Sudden increase in wpsi
+                left_thrust_score = 0.6;
+            } else { // Sudden decrease in wpsi
+                right_thrust_score = 0.6;
+            }
+        }
+    }
+    
+    // Add fault detection criteria based on commanded vs. actual thrust difference
+    // If one thruster is commanded much higher than the other but the vessel isn't turning 
+    // as expected, this indicates a fault
+    if (std::abs(Tp.data - Ts.data) > 50.0) { // Significant thrust differential
+        // Expected strong yaw rate
+        double expected_turn_rate = 0.5; // Approximate, should be calibrated
+        
+        // If actual turn rate is much less than expected, suspect a fault
+        if (std::abs(local_pos.r) < 0.2 * expected_turn_rate) {
+            might_be_fault = true;
+            
+            // Determine which thruster is likely failing based on commands
+            if (Tp.data > Ts.data && local_pos.r > -0.1) {
+                right_thrust_score = 0.7; // Right thrust should cause left turn but isn't
+            } 
+            else if (Ts.data > Tp.data && local_pos.r < 0.1) {
+                left_thrust_score = 0.7; // Left thrust should cause right turn but isn't
+            }
+        }
+    }
+    
+    // Detection based on commanded thrust vs. actual disturbance
+    // This works with asymmetric commands
+    if (Tp.data > 50.0 && Ts.data > 50.0) { // Both thrusters commanded
+        // If wpsi is changing rapidly in a direction inconsistent with commands,
+        // it suggests a fault
+        if (Tp.data >= Ts.data && wpsi_trend < -0.5) {
+            // Left thruster should cause right turn (negative wpsi),
+            // but if trend is strongly negative, suspect left thruster issue
+            might_be_fault = true;
+            left_thrust_score = 0.7;
+        }
+        else if (Ts.data >= Tp.data && wpsi_trend > 0.5) {
+            // Right thruster should cause left turn (positive wpsi),
+            // but if trend is strongly positive, suspect right thruster issue
+            might_be_fault = true;
+            right_thrust_score = 0.7;
+        }
+    }
+    
+    // Special case for zero-commanded thrust with significant disturbance
+    if (Tp.data < 10.0 && Ts.data < 10.0 && std::abs(wpsi) > wpsi_threshold) {
+        // If no thrust is commanded but significant disturbance exists,
+        // this indicates unmodeled dynamics, not a fault
+        might_be_fault = false;
+    }
+    
+    // Add additional criteria based on thrust commands vs. resulting motion
+    if (might_be_fault) {
+        // LEFT thrust issue detection based on trend and commands
+        if (wpsi_change > 3.0 || (wpsi_trend > 0.2 && Tp.data > 50.0)) {
+            // Strong positive trend indicates left thruster weakening
+            left_thrust_score = 0.7 + 0.3 * std::min(std::abs(wpsi_change / 5.0), 1.0);
+            
+            if (left_thrust_score > 0.7) {
+                std::cout << "\033[1;33m" << "LEFT THRUST FAILURE DETECTED BY TREND: wpsi_change = " 
+                          << wpsi_change << ", wpsi_trend = " << wpsi_trend << "\033[0m" << std::endl;
+            }
+        }
+        
+        // RIGHT thrust issue detection based on trend and commands
+        if (wpsi_change < -3.0 || (wpsi_trend < -0.2 && Ts.data > 50.0)) {
+            // Strong negative trend indicates right thruster weakening
+            right_thrust_score = 0.7 + 0.3 * std::min(std::abs(wpsi_change / 5.0), 1.0);
+            
+            if (right_thrust_score > 0.7) {
+                std::cout << "\033[1;33m" << "RIGHT THRUST FAILURE DETECTED BY TREND: wpsi_change = " 
+                          << wpsi_change << ", wpsi_trend = " << wpsi_trend << "\033[0m" << std::endl;
+            }
+        }
+        
+        // Scale fault scores by command magnitude to avoid false positives during low thrust
+        left_thrust_score *= std::min(1.0, Tp.data / 100.0);
+        right_thrust_score *= std::min(1.0, Ts.data / 100.0);
+        
+        // Find the highest score
+        double max_score = std::max({left_thrust_score, right_thrust_score, left_angle_score, right_angle_score});
+        
+        // Determine the most likely fault type
+        if (max_score > fault_model.detect_threshold) {
+            if (max_score == left_thrust_score) {
+                fault_type = LEFT_THRUST_FAILURE;
+                confidence = max_score;
+                return true;
+            } else if (max_score == right_thrust_score) {
+                fault_type = RIGHT_THRUST_FAILURE;
+                confidence = max_score;
+                return true;
+            } else if (max_score == left_angle_score) {
+                fault_type = LEFT_ANGLE_FAILURE;
+                confidence = max_score;
+                return true;
+            } else if (max_score == right_angle_score) {
+                fault_type = RIGHT_ANGLE_FAILURE;
+                confidence = max_score;
+                return true;
+            }
+        }
+    }
+    
+    // If we got here, no fault was detected
     fault_type = NO_FAULT;
     confidence = 0.0;
     return false;
@@ -1066,8 +1385,22 @@ void WAMV_MPC::publishFaultDiagnosis(int fault_type, double confidence)
                    std::to_string(confidence * 100.0) + "%)";
     fault_diagnosis_pub->publish(*message);
     
-    // RCLCPP_INFO(this->get_logger(), "Fault diagnosis: %s (%.2f%%)", 
-    //            fault_str.c_str(), confidence * 100.0);
+    // Add more detailed logging for debugging
+    RCLCPP_INFO(this->get_logger(), "FAULT DIAGNOSIS: %s (Confidence: %.2f%%)", 
+               fault_str.c_str(), confidence * 100.0);
+               
+    // Print additional debug info to console
+    std::cout << "\033[1;36m" << "FAULT DIAGNOSIS: " << fault_str 
+              << " (Confidence: " << std::fixed << std::setprecision(2) 
+              << confidence * 100.0 << "%)" << "\033[0m" << std::endl;
+              
+    // Print current disturbance values and thrusts
+    std::cout << "\033[1;36m" << "  Disturbances - w_x: " << esti_x[6] 
+              << ", w_y: " << esti_x[7] << ", w_psi: " << esti_x[8] << "\033[0m" << std::endl;
+              
+    std::cout << "\033[1;36m" << "  Thrusts - Tp: " << Tp.data 
+              << ", Ts: " << Ts.data << ", delta_p: " << delta_p.data 
+              << ", delta_s: " << delta_s.data << "\033[0m" << std::endl;
 }
 
 // Save the fault model to a file
@@ -1120,4 +1453,101 @@ void WAMV_MPC::loadFaultModel(const std::string& filename)
     }
 }
 
+// Implement the calibration function
+void WAMV_MPC::calibrateDisturbanceModel()
+{
+    // Skip calibration if disabled
+    if (!calibration_enabled) {
+        return;
+    }
+    
+    // Only run calibration every 10 iterations
+    calibration_counter++;
+    if (calibration_counter % 10 != 0) {
+        return;
+    }
+    
+    // Only collect data during stable operation with no faults
+    static std::deque<Vector4d> command_history;
+    Vector4d current_command(Tp.data, Ts.data, delta_p.data, delta_s.data);
+    command_history.push_back(current_command);
+    if (command_history.size() > 50) {
+        command_history.pop_front();
+    }
+    
+    // Check if commands have been stable for a reasonable period
+    bool commands_stable = true;
+    if (command_history.size() > 20) {
+        Vector4d first_cmd = command_history[command_history.size() - 20];
+        for (size_t i = command_history.size() - 19; i < command_history.size(); i++) {
+            if (std::abs(command_history[i][0] - first_cmd[0]) > 10.0 || 
+                std::abs(command_history[i][1] - first_cmd[1]) > 10.0 ||
+                std::abs(command_history[i][2] - first_cmd[2]) > 0.1 ||
+                std::abs(command_history[i][3] - first_cmd[3]) > 0.1) {
+                commands_stable = false;
+                break;
+            }
+        }
+    } else {
+        commands_stable = false;
+    }
+    
+    // Only collect data during stable operation with no faults and sufficient thrust
+    if (!fault_detected && commands_stable && 
+        Tp.data > 30.0 && Ts.data > 30.0 && 
+        std::abs(esti_x[8]) > 1.0) {
+        
+        double thrust_diff = Ts.data - Tp.data;
+        double current_wpsi = esti_x[8];
+        
+        // Add the data point to our calibration dataset
+        calibration_data.push_back(std::make_pair(thrust_diff, current_wpsi));
+        
+        // Limit calibration dataset size
+        if (calibration_data.size() > 1000) {
+            calibration_data.erase(calibration_data.begin());
+        }
+        
+        // Only update model if we have enough data points
+        if (calibration_data.size() > 50) {
+            // Perform linear regression to find the best relationship
+            // between thrust_diff and wpsi using least squares method
+            double sum_x = 0.0, sum_y = 0.0, sum_xy = 0.0, sum_xx = 0.0;
+            size_t n = calibration_data.size();
+            
+            for (const auto& point : calibration_data) {
+                double x = point.first;   // thrust_diff
+                double y = point.second;  // wpsi
+                
+                sum_x += x;
+                sum_y += y;
+                sum_xy += x * y;
+                sum_xx += x * x;
+            }
+            
+            // Calculate the slope (coefficient)
+            if (std::abs(n * sum_xx - sum_x * sum_x) > 1e-6) {  // Avoid division by zero
+                double new_coefficient = (n * sum_xy - sum_x * sum_y) / (n * sum_xx - sum_x * sum_x);
+                
+                // Smooth the update to avoid rapid changes
+                double alpha = 0.1;  // Smoothing factor
+                wpsi_coefficient = alpha * new_coefficient + (1.0 - alpha) * wpsi_coefficient;
+                
+                // Apply bounds to avoid unreasonable values
+                wpsi_coefficient = std::max(-0.2, std::min(0.2, wpsi_coefficient));
+                
+                // Publish the updated coefficient
+                auto msg = std::make_unique<std_msgs::msg::Float64>();
+                msg->data = wpsi_coefficient;
+                wpsi_coefficient_pub->publish(*msg);
+                
+                // Log the update occasionally
+                static int log_counter = 0;
+                if (log_counter++ % 50 == 0) {
+                    RCLCPP_INFO(this->get_logger(), "Updated wpsi_coefficient: %.5f", wpsi_coefficient);
+                }
+            }
+        }
+    }
+}
 

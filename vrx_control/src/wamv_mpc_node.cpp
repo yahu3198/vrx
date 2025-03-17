@@ -22,6 +22,9 @@ int main(int argc, char **argv)
         if (wm_node->is_start == true) {
             wm_node->EKF();
             
+            // Run calibration at every iteration (it has its own throttling)
+            wm_node->calibrateDisturbanceModel();
+            
             // Run fault diagnosis at 10 Hz
             if (iteration_count % fault_diagnosis_frequency == 0) {
                 wm_node->updateFaultModel();

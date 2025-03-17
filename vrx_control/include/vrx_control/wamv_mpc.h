@@ -269,6 +269,13 @@ class WAMV_MPC : public rclcpp::Node
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr fault_diagnosis_pub;
     rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr fault_features_pub;
 
+    // Add these for disturbance model calibration
+    std::vector<std::pair<double, double>> calibration_data;  // (thrust_diff, wpsi) pairs
+    double wpsi_coefficient;                                  // Relationship between thrust difference and yaw disturbance
+    int calibration_counter;                                  // Counter for calibration timing
+    bool calibration_enabled;                                 // Flag to enable/disable calibration
+    rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr wpsi_coefficient_pub; // Publisher for coefficient
+
     public:
 
     bool is_start;
@@ -297,6 +304,8 @@ class WAMV_MPC : public rclcpp::Node
     void publishFaultDiagnosis(int fault_type, double confidence);
     void saveFaultModel(const std::string& filename);
     void loadFaultModel(const std::string& filename);
+    void calibrateDisturbanceModel();
+    
 };
 
 #endif
