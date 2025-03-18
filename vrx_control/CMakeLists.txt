@@ -27,6 +27,8 @@ find_package(rcl_interfaces REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)  
 find_package(nav_msgs REQUIRED)
 
+find_package(Qt5 COMPONENTS Widgets Core Gui Charts REQUIRED)
+
 ament_export_include_directories(include)
 ament_export_libraries(vrx_control)
 ament_export_dependencies(rclcpp rclpy std_msgs geometry_msgs gazebo_msgs tf2 tf2_ros rcl_interfaces tf2_geometry_msgs sensor_msgs)  # Add tf2_geometry_msgs here
@@ -50,7 +52,17 @@ include_directories(
   ${acados_include}/qpOASES_e/
   ${tf2_geometry_msgs_INCLUDE_DIRS}
   ${nav_msgs_INCLUDE_DIRS}
+  ${CMAKE_CURRENT_SOURCE_DIR}/include
+  ${Qt5Widgets_INCLUDE_DIRS}
+  ${Qt5Core_INCLUDE_DIRS}
+  ${Qt5Gui_INCLUDE_DIRS}
+  ${Qt5Charts_INCLUDE_DIRS}
 )
+
+# Enable Qt5's meta-object compiler
+set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTOUIC ON)
+set(CMAKE_AUTORCC ON)
 
 link_directories(${wamv_model})
 
@@ -79,6 +91,47 @@ target_link_libraries(wamv_mpc_node
 
 install(TARGETS wamv_mpc_node
   DESTINATION lib/${PROJECT_NAME}
+)
+
+# Add the dashboard node
+add_executable(wamv_dashboard_node
+  src/wamv_dashboard_node.cpp
+  src/wamv_dashboard.cpp
+  include/vrx_control/wamv_dashboard.h  # Explicitly include the header
+)
+
+ament_target_dependencies(wamv_dashboard_node
+  rclcpp
+  std_msgs
+  geometry_msgs
+  nav_msgs
+  sensor_msgs
+  tf2
+  tf2_ros
+)
+
+# Link Qt libraries to the dashboard node
+target_link_libraries(wamv_dashboard_node
+  Qt5::Widgets
+  Qt5::Core
+  Qt5::Gui
+  Qt5::Charts
+)
+
+# Install the dashboard node
+install(TARGETS wamv_dashboard_node
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+# Install the dashboard launch file
+install(FILES
+  launch/dashboard.launch.py
+  DESTINATION share/${PROJECT_NAME}/launch
+)
+
+install(FILES
+  launch/mpc_with_dashboard.launch.py
+  DESTINATION share/${PROJECT_NAME}/launch
 )
 
 if(BUILD_TESTING)

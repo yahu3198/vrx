@@ -23,12 +23,21 @@
   <depend>rclpy</depend>
   <depend>rcl_interfaces</depend>
 
+  <!-- Add these dependencies to your existing package.xml -->
+  <depend>qtbase5-dev</depend>
+  <depend>libqt5-charts5-dev</depend>
+  <depend>libqt5-widgets</depend>
+  <depend>libqt5-gui</depend>
+  <depend>libqt5-core</depend>
+
 
   <export>
     <build_type>ament_cmake</build_type>
     <launch>
       <launch_file>mpc.launch.py</launch_file>
       <launch_file>start_mpc.launch.py</launch_file>
+      <launch_file>dashboard.launch.py</launch_file>
+      <launch_file>mpc_with_dashboard.launch.py</launch_file>
     </launch>
   </export>
 </package>
