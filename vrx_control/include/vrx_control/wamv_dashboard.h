@@ -44,6 +44,8 @@ public:
     void handleFaultDiagnosisMsg(const std_msgs::msg::String::SharedPtr msg);
     void handleFaultFeaturesMsg(const std_msgs::msg::Float64MultiArray::SharedPtr msg);
     void handleWpsiCoefficientMsg(const std_msgs::msg::Float64::SharedPtr msg);
+    void updateTimeAxis(QChart *chart, double min_time, double max_time);
+    void updateValueAxis(QChart *chart, const std::deque<double> &data);
 
 private slots:
     void updatePlots();
@@ -51,6 +53,7 @@ private slots:
     
 
 private:
+    double start_time_ = 0.0;  // Time reference
     // ROS2 node pointer
     std::shared_ptr<WAMVDashboardNode> node_ptr_;
     
@@ -68,10 +71,16 @@ private:
     double fault_confidence_;
     
     // Qt UI components
-    QChart *disturbance_chart_;
-    QChartView *disturbance_view_;
+    QChart *wx_chart_;
+    QChartView *wx_view_;
     QLineSeries *wx_series_;
+    
+    QChart *wy_chart_;
+    QChartView *wy_view_;
     QLineSeries *wy_series_;
+    
+    QChart *wpsi_chart_;
+    QChartView *wpsi_view_;
     QLineSeries *wpsi_series_;
     QLineSeries *wpsi_calibrated_series_;
     

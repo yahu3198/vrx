@@ -116,34 +116,69 @@ void WAMVDashboard::setupUI()
     // Create charts
     setupCharts();
     
-    // Create layout for charts
-    QHBoxLayout *charts_layout = new QHBoxLayout();
+     // Create layout for charts
+     QGridLayout *charts_layout = new QGridLayout();
     
-    // Add disturbance chart
-    charts_layout->addWidget(disturbance_view_, 1);
-    
-    // Add trajectory chart
-    charts_layout->addWidget(trajectory_view_, 1);
-    
-    // Add layouts to main layout
-    main_layout->addLayout(status_layout);
-    main_layout->addLayout(charts_layout);
-    
-    // Set central widget
-    setCentralWidget(central_widget);
+     // Create container for disturbance charts
+     QVBoxLayout *disturbance_layout = new QVBoxLayout();
+     disturbance_layout->addWidget(wx_view_);
+     disturbance_layout->addWidget(wy_view_);
+     disturbance_layout->addWidget(wpsi_view_);
+     
+     // Add both layouts to the grid
+     QWidget *disturbance_widget = new QWidget();
+     disturbance_widget->setLayout(disturbance_layout);
+     
+     charts_layout->addWidget(disturbance_widget, 0, 0);
+     charts_layout->addWidget(trajectory_view_, 0, 1);
+     
+     // Set column stretch to make the trajectory view a bit larger
+     charts_layout->setColumnStretch(0, 1);
+     charts_layout->setColumnStretch(1, 1);
+     
+     // Add layouts to main layout
+     main_layout->addLayout(status_layout);
+     main_layout->addLayout(charts_layout);
+     
+     // Set central widget
+     setCentralWidget(central_widget);
 }
 
 void WAMVDashboard::setupCharts()
 {
-    // Setup disturbance time series chart
-    disturbance_chart_ = new QChart();
-    disturbance_chart_->setTitle("Disturbance Values Over Time");
+    // Setup wx chart
+    wx_chart_ = new QChart();
+    wx_chart_->setTitle("w_x (Linear X Disturbance)");
     
     wx_series_ = new QLineSeries();
     wx_series_->setName("w_x");
     
+    wx_chart_->addSeries(wx_series_);
+    wx_chart_->createDefaultAxes();
+    wx_chart_->axes(Qt::Horizontal).first()->setTitleText("Time (s)");
+    wx_chart_->axes(Qt::Vertical).first()->setTitleText("w_x Value");
+    
+    wx_view_ = new QChartView(wx_chart_);
+    wx_view_->setRenderHint(QPainter::Antialiasing);
+    
+    // Setup wy chart
+    wy_chart_ = new QChart();
+    wy_chart_->setTitle("w_y (Linear Y Disturbance)");
+    
     wy_series_ = new QLineSeries();
     wy_series_->setName("w_y");
+    
+    wy_chart_->addSeries(wy_series_);
+    wy_chart_->createDefaultAxes();
+    wy_chart_->axes(Qt::Horizontal).first()->setTitleText("Time (s)");
+    wy_chart_->axes(Qt::Vertical).first()->setTitleText("w_y Value");
+    
+    wy_view_ = new QChartView(wy_chart_);
+    wy_view_->setRenderHint(QPainter::Antialiasing);
+    
+    // Setup wpsi chart
+    wpsi_chart_ = new QChart();
+    wpsi_chart_->setTitle("w_psi (Angular Z Disturbance)");
     
     wpsi_series_ = new QLineSeries();
     wpsi_series_->setName("w_psi (raw)");
@@ -151,17 +186,15 @@ void WAMVDashboard::setupCharts()
     wpsi_calibrated_series_ = new QLineSeries();
     wpsi_calibrated_series_->setName("w_psi (calibrated)");
     
-    disturbance_chart_->addSeries(wx_series_);
-    disturbance_chart_->addSeries(wy_series_);
-    disturbance_chart_->addSeries(wpsi_series_);
-    disturbance_chart_->addSeries(wpsi_calibrated_series_);
+    wpsi_chart_->addSeries(wpsi_series_);
+    wpsi_chart_->addSeries(wpsi_calibrated_series_);
+    wpsi_chart_->createDefaultAxes();
+    wpsi_chart_->axes(Qt::Horizontal).first()->setTitleText("Time (s)");
+    wpsi_chart_->axes(Qt::Vertical).first()->setTitleText("w_psi Value");
     
-    disturbance_chart_->createDefaultAxes();
-    disturbance_chart_->axes(Qt::Horizontal).first()->setTitleText("Time (s)");
-    disturbance_chart_->axes(Qt::Vertical).first()->setTitleText("Disturbance Value");
+    wpsi_view_ = new QChartView(wpsi_chart_);
+    wpsi_view_->setRenderHint(QPainter::Antialiasing);
     
-    disturbance_view_ = new QChartView(disturbance_chart_);
-    disturbance_view_->setRenderHint(QPainter::Antialiasing);
     
     // Setup trajectory chart
     trajectory_chart_ = new QChart();
@@ -191,17 +224,17 @@ void WAMVDashboard::setupCharts()
 
 void WAMVDashboard::handleDisturbanceMsg(const geometry_msgs::msg::TwistStamped::SharedPtr msg)
 {
-    // Store timestamp
+    // Get current time
     auto time_point = node_ptr_->now();
     double current_time = time_point.seconds();
     
-    // If this is the first message, use it as the reference time
+    // If this is the first message, set the reference time
     if (time_data_.empty()) {
+        start_time_ = current_time;
         time_data_.push_back(0.0);
     } else {
-        // Calculate relative time since first message
-        double first_time = time_data_.front();
-        time_data_.push_back(current_time - first_time);
+        // Calculate relative time since start
+        time_data_.push_back(current_time - start_time_);
     }
     
     // Store disturbance values
@@ -292,15 +325,22 @@ void WAMVDashboard::handleWpsiCoefficientMsg(const std_msgs::msg::Float64::Share
 
 void WAMVDashboard::updatePlots()
 {
-    // Update disturbance series data
+    // Update wx series data
     wx_series_->clear();
-    wy_series_->clear();
-    wpsi_series_->clear();
-    wpsi_calibrated_series_->clear();
-    
     for (size_t i = 0; i < time_data_.size(); i++) {
         wx_series_->append(time_data_[i], wx_data_[i]);
+    }
+    
+    // Update wy series data
+    wy_series_->clear();
+    for (size_t i = 0; i < time_data_.size(); i++) {
         wy_series_->append(time_data_[i], wy_data_[i]);
+    }
+    
+    // Update wpsi series data
+    wpsi_series_->clear();
+    wpsi_calibrated_series_->clear();
+    for (size_t i = 0; i < time_data_.size(); i++) {
         wpsi_series_->append(time_data_[i], wpsi_data_[i]);
         wpsi_calibrated_series_->append(time_data_[i], wpsi_calibrated_data_[i]);
     }
@@ -330,14 +370,36 @@ void WAMVDashboard::updatePlots()
             y_axis->setRange(min_y - margin_y, max_y + margin_y);
         }
     }
-    
-    // Update disturbance chart axes if needed
+
+    // Auto-adjust time axis for all charts
     if (!time_data_.empty()) {
-        QValueAxis *x_axis = qobject_cast<QValueAxis*>(disturbance_chart_->axes(Qt::Horizontal).first());
-        if (x_axis) {
-            double max_time = time_data_.back();
-            double min_time = std::max(0.0, max_time - 30.0);  // Show last 30 seconds
-            x_axis->setRange(min_time, max_time);
+        double max_time = time_data_.back();
+        double min_time = std::max(0.0, max_time - 30.0);  // Show last 30 seconds
+        
+        updateTimeAxis(wx_chart_, min_time, max_time);
+        updateTimeAxis(wy_chart_, min_time, max_time);
+        updateTimeAxis(wpsi_chart_, min_time, max_time);
+    }
+    
+    // Auto-adjust y-axes based on data
+    if (!wx_data_.empty()) {
+        updateValueAxis(wx_chart_, wx_data_);
+    }
+    
+    if (!wy_data_.empty()) {
+        updateValueAxis(wy_chart_, wy_data_);
+    }
+    
+    if (!wpsi_data_.empty()) {
+        double min_wpsi = std::min(*std::min_element(wpsi_data_.begin(), wpsi_data_.end()),
+                                 *std::min_element(wpsi_calibrated_data_.begin(), wpsi_calibrated_data_.end()));
+        double max_wpsi = std::max(*std::max_element(wpsi_data_.begin(), wpsi_data_.end()),
+                                 *std::max_element(wpsi_calibrated_data_.begin(), wpsi_calibrated_data_.end()));
+        double margin = std::max(0.5, (max_wpsi - min_wpsi) * 0.1);
+        
+        QValueAxis *y_axis = qobject_cast<QValueAxis*>(wpsi_chart_->axes(Qt::Vertical).first());
+        if (y_axis) {
+            y_axis->setRange(min_wpsi - margin, max_wpsi + margin);
         }
     }
 }
@@ -384,5 +446,26 @@ QColor WAMVDashboard::getFaultStatusColor()
         int red = 255;
         int green = static_cast<int>(255 * (1.0 - fault_confidence_ / 100.0));
         return QColor(red, green, 0);
+    }
+}
+
+// Add helper methods for axis updates
+void WAMVDashboard::updateTimeAxis(QChart *chart, double min_time, double max_time) {
+    QValueAxis *x_axis = qobject_cast<QValueAxis*>(chart->axes(Qt::Horizontal).first());
+    if (x_axis) {
+        x_axis->setRange(min_time, max_time);
+    }
+}
+
+void WAMVDashboard::updateValueAxis(QChart *chart, const std::deque<double> &data) {
+    if (data.empty()) return;
+    
+    double min_val = *std::min_element(data.begin(), data.end());
+    double max_val = *std::max_element(data.begin(), data.end());
+    double margin = std::max(0.5, (max_val - min_val) * 0.1);
+    
+    QValueAxis *y_axis = qobject_cast<QValueAxis*>(chart->axes(Qt::Vertical).first());
+    if (y_axis) {
+        y_axis->setRange(min_val - margin, max_val + margin);
     }
 }
