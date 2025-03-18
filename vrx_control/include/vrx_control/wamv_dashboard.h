@@ -96,7 +96,7 @@ private:
     QTimer *update_timer_;
     
     // Configuration
-    const int MAX_DATA_POINTS = 200;  // Maximum number of points to display in time series
+    const int MAX_DATA_POINTS = 1000;  // Maximum number of points to display in time series
     const int UPDATE_INTERVAL_MS = 100;  // Update interval in milliseconds
     
     // Helper functions

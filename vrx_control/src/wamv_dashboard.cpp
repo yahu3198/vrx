@@ -179,19 +179,16 @@ void WAMVDashboard::setupCharts()
     // Setup wpsi chart
     wpsi_chart_ = new QChart();
     wpsi_chart_->setTitle("w_psi (Angular Z Disturbance)");
-    
+
+    // Only create one series for the calibrated value
     wpsi_series_ = new QLineSeries();
-    wpsi_series_->setName("w_psi (raw)");
-    
-    wpsi_calibrated_series_ = new QLineSeries();
-    wpsi_calibrated_series_->setName("w_psi (calibrated)");
-    
+    wpsi_series_->setName("w_psi");  // Remove the "(calibrated)" label
+
     wpsi_chart_->addSeries(wpsi_series_);
-    wpsi_chart_->addSeries(wpsi_calibrated_series_);
     wpsi_chart_->createDefaultAxes();
     wpsi_chart_->axes(Qt::Horizontal).first()->setTitleText("Time (s)");
     wpsi_chart_->axes(Qt::Vertical).first()->setTitleText("w_psi Value");
-    
+
     wpsi_view_ = new QChartView(wpsi_chart_);
     wpsi_view_->setRenderHint(QPainter::Antialiasing);
     
@@ -339,10 +336,9 @@ void WAMVDashboard::updatePlots()
     
     // Update wpsi series data
     wpsi_series_->clear();
-    wpsi_calibrated_series_->clear();
     for (size_t i = 0; i < time_data_.size(); i++) {
-        wpsi_series_->append(time_data_[i], wpsi_data_[i]);
-        wpsi_calibrated_series_->append(time_data_[i], wpsi_calibrated_data_[i]);
+        // Use only the calibrated value
+        wpsi_series_->append(time_data_[i], wpsi_calibrated_data_[i]);
     }
     
     // Update trajectory series data
@@ -374,7 +370,7 @@ void WAMVDashboard::updatePlots()
     // Auto-adjust time axis for all charts
     if (!time_data_.empty()) {
         double max_time = time_data_.back();
-        double min_time = std::max(0.0, max_time - 30.0);  // Show last 30 seconds
+        double min_time = std::max(0.0, max_time - 10.0);  // Show only last 10 seconds
         
         updateTimeAxis(wx_chart_, min_time, max_time);
         updateTimeAxis(wy_chart_, min_time, max_time);
@@ -390,17 +386,8 @@ void WAMVDashboard::updatePlots()
         updateValueAxis(wy_chart_, wy_data_);
     }
     
-    if (!wpsi_data_.empty()) {
-        double min_wpsi = std::min(*std::min_element(wpsi_data_.begin(), wpsi_data_.end()),
-                                 *std::min_element(wpsi_calibrated_data_.begin(), wpsi_calibrated_data_.end()));
-        double max_wpsi = std::max(*std::max_element(wpsi_data_.begin(), wpsi_data_.end()),
-                                 *std::max_element(wpsi_calibrated_data_.begin(), wpsi_calibrated_data_.end()));
-        double margin = std::max(0.5, (max_wpsi - min_wpsi) * 0.1);
-        
-        QValueAxis *y_axis = qobject_cast<QValueAxis*>(wpsi_chart_->axes(Qt::Vertical).first());
-        if (y_axis) {
-            y_axis->setRange(min_wpsi - margin, max_wpsi + margin);
-        }
+    if (!wpsi_calibrated_data_.empty()) {
+        updateValueAxis(wpsi_chart_, wpsi_calibrated_data_);
     }
 }
 
