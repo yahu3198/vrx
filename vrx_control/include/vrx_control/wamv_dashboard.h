@@ -53,7 +53,11 @@ private slots:
     
 
 private:
-    double start_time_ = 0.0;  // Time reference
+    // Fault tracking variables
+    std::deque<bool> fault_active_history_;
+    double start_time_ = 0.0;       // Reference time for plotting
+    double fault_start_time_ = -1.0; // When fault was first detected
+    
     // ROS2 node pointer
     std::shared_ptr<WAMVDashboardNode> node_ptr_;
     
@@ -82,7 +86,6 @@ private:
     QChart *wpsi_chart_;
     QChartView *wpsi_view_;
     QLineSeries *wpsi_series_;
-    QLineSeries *wpsi_calibrated_series_;
     
     QChart *trajectory_chart_;
     QChartView *trajectory_view_;
