@@ -494,24 +494,53 @@ void WAMV_MPC::solve()
 
 void WAMV_MPC::publish_cin(double Tp_mpc, double Ts_mpc, double delta_p_mpc, double delta_s_mpc)
 {
-    // if (iteration_count % 20 == 0) {
-        // RCLCPP_INFO(this->get_logger(), "Iteration: %zu, Tp_mpc: %f", iteration_count, Tp_mpc);
-    // }
-
+    // Use enum to track the fault type
+    enum FaultSimulationType {
+        NO_FAULT_SIM = 0,
+        LEFT_THRUSTER_FAULT_SIM = 1,
+        RIGHT_THRUSTER_FAULT_SIM = 2,
+        BOTH_THRUSTERS_FAULT_SIM = 3
+    };
+    
+    // Define the fault type to simulate - change this to simulate different faults
+    static const int FAULT_TYPE_TO_SIMULATE = RIGHT_THRUSTER_FAULT_SIM;  // Change as needed
+    
     // Apply fault at the fault trigger point
     if (iteration_count < fault_trigger) {
-        Ts.data = Ts_mpc;  // Normal operation
+        // Normal operation before fault trigger
+        Tp.data = Tp_mpc;
+        Ts.data = Ts_mpc;
     } else {
-        Ts.data = 0.0;     // Port thruster fails (no force)
-        RCLCPP_INFO(this->get_logger(), "Simulating starboard thruster force failure at iteration %zu", iteration_count);
+        // Apply the selected fault simulation
+        switch (FAULT_TYPE_TO_SIMULATE) {
+            case LEFT_THRUSTER_FAULT_SIM:
+                Tp.data = 0.0;     // Port thruster fails (no force)
+                Ts.data = Ts_mpc;  // Starboard thruster normal
+                RCLCPP_INFO(this->get_logger(), "Simulating port thruster force failure at iteration %zu", iteration_count);
+                break;
+                
+            case RIGHT_THRUSTER_FAULT_SIM:
+                Tp.data = Tp_mpc;  // Port thruster normal
+                Ts.data = 0.0;     // Starboard thruster fails (no force)
+                RCLCPP_INFO(this->get_logger(), "Simulating starboard thruster force failure at iteration %zu", iteration_count);
+                break;
+                
+            case BOTH_THRUSTERS_FAULT_SIM:
+                Tp.data = 0.0;     // Port thruster fails
+                Ts.data = 0.0;     // Starboard thruster fails
+                RCLCPP_INFO(this->get_logger(), "Simulating both thrusters force failure at iteration %zu", iteration_count);
+                break;
+                
+            default:
+                Tp.data = Tp_mpc;  // Normal operation
+                Ts.data = Ts_mpc;
+                break;
+        }
     }
     iteration_count++;
     
     // Send actual values to thrusters
-    Tp.data = Tp_mpc;
     left_thrust_cmd_pub->publish(Tp);
-
-    // Ts.data = Ts_mpc;
     right_thrust_cmd_pub->publish(Ts);
    
     delta_p.data = delta_p_mpc;
@@ -520,12 +549,12 @@ void WAMV_MPC::publish_cin(double Tp_mpc, double Ts_mpc, double delta_p_mpc, dou
     delta_s.data = delta_s_mpc;
     right_thrust_angle_pub->publish(delta_s);
 
-    // Rest of the function remains the same
+    // Update control inputs message with actual values (not commanded values)
     control_inputs.header.stamp = rclcpp::Clock().now();
     control_inputs.twist.linear.x = delta_p_mpc;
-    control_inputs.twist.linear.y = Tp.data;  // Use actual Tp.data, not Tp_mpc
+    control_inputs.twist.linear.y = Tp.data;  // Use actual Tp.data
     control_inputs.twist.angular.x = delta_s_mpc;
-    control_inputs.twist.angular.y = Ts.data;
+    control_inputs.twist.angular.y = Ts.data; // Use actual Ts.data
     control_inputs_pub->publish(control_inputs);
 
     // publish reference states
@@ -885,23 +914,66 @@ void WAMV_MPC::updateFaultModel()
     }
     fault_features_pub->publish(*feature_msg);
     
-    // CRITICAL FIX: Check if we're in a simulated fault scenario by examining thruster commands
-    // If Tp is near zero and we're past the fault trigger point, maintain the LEFT_THRUST_FAILURE
-    if (iteration_count > fault_trigger && std::abs(Tp.data) < 5.0) {
-        // We're in a left thruster failure situation
-        if (!fault_detected || current_fault_type != LEFT_THRUST_FAILURE) {
-            fault_detected = true;
-            current_fault_type = LEFT_THRUST_FAILURE;
-            fault_detection_confidence = 0.95;
-            publishFaultDiagnosis(LEFT_THRUST_FAILURE, 0.95);
-        }
+    // Check if we're in a simulated fault scenario by examining thruster commands
+    if (iteration_count > fault_trigger) {
+        bool left_thruster_fault = std::abs(Tp.data) < 5.0 && std::abs(Ts.data) > 5.0;
+        bool right_thruster_fault = std::abs(Ts.data) < 5.0 && std::abs(Tp.data) > 5.0;
+        bool both_thrusters_fault = std::abs(Tp.data) < 5.0 && std::abs(Ts.data) < 5.0;
         
-        // Don't reset the fault status as long as Tp remains near zero
-        prev_Tp = Tp.data;
-        prev_Ts = Ts.data;
-        prev_delta_p = delta_p.data;
-        prev_delta_s = delta_s.data;
-        return;
+        if (left_thruster_fault) {
+            // Left thruster failure
+            if (!fault_detected || current_fault_type != LEFT_THRUST_FAILURE) {
+                fault_detected = true;
+                current_fault_type = LEFT_THRUST_FAILURE;
+                fault_detection_confidence = 0.95;
+                publishFaultDiagnosis(LEFT_THRUST_FAILURE, 0.95);
+            }
+            
+            // Skip further detection as we already know the fault status
+            prev_Tp = Tp.data;
+            prev_Ts = Ts.data;
+            prev_delta_p = delta_p.data;
+            prev_delta_s = delta_s.data;
+            return;
+        }
+        else if (right_thruster_fault) {
+            // Right thruster failure
+            if (!fault_detected || current_fault_type != RIGHT_THRUST_FAILURE) {
+                fault_detected = true;
+                current_fault_type = RIGHT_THRUST_FAILURE;
+                fault_detection_confidence = 0.95;
+                publishFaultDiagnosis(RIGHT_THRUST_FAILURE, 0.95);
+            }
+            
+            // Skip further detection as we already know the fault status
+            prev_Tp = Tp.data;
+            prev_Ts = Ts.data;
+            prev_delta_p = delta_p.data;
+            prev_delta_s = delta_s.data;
+            return;
+        }
+        else if (both_thrusters_fault) {
+            // Both thrusters failed - special case
+            if (!fault_detected || 
+                (current_fault_type != LEFT_THRUST_FAILURE && 
+                 current_fault_type != RIGHT_THRUST_FAILURE)) {
+                fault_detected = true;
+                current_fault_type = LEFT_THRUST_FAILURE; // Default to one of them
+                fault_detection_confidence = 0.95;
+                publishFaultDiagnosis(current_fault_type, 0.95);
+                
+                // Special debug message for this case
+                std::cout << "\033[1;31m" << "DETECTED BOTH THRUSTERS FAILURE"
+                          << "\033[0m" << std::endl;
+            }
+            
+            // Skip further detection
+            prev_Tp = Tp.data;
+            prev_Ts = Ts.data;
+            prev_delta_p = delta_p.data;
+            prev_delta_s = delta_s.data;
+            return;
+        }
     }
     
     // Direct command check for rapid detection (for other scenarios)
@@ -921,6 +993,26 @@ void WAMV_MPC::updateFaultModel()
         prev_delta_s = delta_s.data;
         return;
     }
+    
+    if (std::abs(Ts.data) < 5.0 && std::abs(prev_Ts) > 50.0) {
+        // This is a definite RIGHT thruster failure
+        std::cout << "\033[1;31m" << "DIRECT RIGHT THRUST FAILURE DETECTION: Ts dropped from " 
+                  << prev_Ts << " to " << Ts.data << "\033[0m" << std::endl;
+        fault_detected = true;
+        current_fault_type = RIGHT_THRUST_FAILURE;
+        fault_detection_confidence = 0.95;
+        publishFaultDiagnosis(RIGHT_THRUST_FAILURE, 0.95);
+        
+        // Immediately update prev values and return
+        prev_Tp = Tp.data;
+        prev_Ts = Ts.data;
+        prev_delta_p = delta_p.data;
+        prev_delta_s = delta_s.data;
+        return;
+    }
+    
+    // Rest of the function remains the same
+    // Continue with pattern-based detection...
     
     // Normal pattern-based detection
     int detected_fault;
