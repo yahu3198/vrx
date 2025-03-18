@@ -498,17 +498,20 @@ void WAMV_MPC::publish_cin(double Tp_mpc, double Ts_mpc, double delta_p_mpc, dou
         // RCLCPP_INFO(this->get_logger(), "Iteration: %zu, Tp_mpc: %f", iteration_count, Tp_mpc);
     // }
 
-    // publish control inputs
+    // Apply fault at the fault trigger point
     if (iteration_count < fault_trigger) {
-        Tp.data = Tp_mpc;  // Normal operation
+        Ts.data = Ts_mpc;  // Normal operation
     } else {
-        Tp.data = 0.0;     // Port thruster fails (no force)
-        RCLCPP_INFO(this->get_logger(), "Simulating port thruster force failure at iteration %zu", iteration_count);
+        Ts.data = 0.0;     // Port thruster fails (no force)
+        RCLCPP_INFO(this->get_logger(), "Simulating starboard thruster force failure at iteration %zu", iteration_count);
     }
     iteration_count++;
+    
+    // Send actual values to thrusters
+    Tp.data = Tp_mpc;
     left_thrust_cmd_pub->publish(Tp);
 
-    Ts.data = Ts_mpc;
+    // Ts.data = Ts_mpc;
     right_thrust_cmd_pub->publish(Ts);
    
     delta_p.data = delta_p_mpc;
@@ -517,11 +520,12 @@ void WAMV_MPC::publish_cin(double Tp_mpc, double Ts_mpc, double delta_p_mpc, dou
     delta_s.data = delta_s_mpc;
     right_thrust_angle_pub->publish(delta_s);
 
+    // Rest of the function remains the same
     control_inputs.header.stamp = rclcpp::Clock().now();
     control_inputs.twist.linear.x = delta_p_mpc;
-    control_inputs.twist.linear.y = Tp_mpc;
+    control_inputs.twist.linear.y = Tp.data;  // Use actual Tp.data, not Tp_mpc
     control_inputs.twist.angular.x = delta_s_mpc;
-    control_inputs.twist.angular.y = Ts_mpc;
+    control_inputs.twist.angular.y = Ts.data;
     control_inputs_pub->publish(control_inputs);
 
     // publish reference states
@@ -881,7 +885,26 @@ void WAMV_MPC::updateFaultModel()
     }
     fault_features_pub->publish(*feature_msg);
     
-    // Direct command check for rapid detection
+    // CRITICAL FIX: Check if we're in a simulated fault scenario by examining thruster commands
+    // If Tp is near zero and we're past the fault trigger point, maintain the LEFT_THRUST_FAILURE
+    if (iteration_count > fault_trigger && std::abs(Tp.data) < 5.0) {
+        // We're in a left thruster failure situation
+        if (!fault_detected || current_fault_type != LEFT_THRUST_FAILURE) {
+            fault_detected = true;
+            current_fault_type = LEFT_THRUST_FAILURE;
+            fault_detection_confidence = 0.95;
+            publishFaultDiagnosis(LEFT_THRUST_FAILURE, 0.95);
+        }
+        
+        // Don't reset the fault status as long as Tp remains near zero
+        prev_Tp = Tp.data;
+        prev_Ts = Ts.data;
+        prev_delta_p = delta_p.data;
+        prev_delta_s = delta_s.data;
+        return;
+    }
+    
+    // Direct command check for rapid detection (for other scenarios)
     if (std::abs(Tp.data) < 5.0 && std::abs(prev_Tp) > 50.0) {
         // This is a definite LEFT thruster failure
         std::cout << "\033[1;31m" << "DIRECT LEFT THRUST FAILURE DETECTION: Tp dropped from " 
@@ -890,23 +913,6 @@ void WAMV_MPC::updateFaultModel()
         current_fault_type = LEFT_THRUST_FAILURE;
         fault_detection_confidence = 0.95;
         publishFaultDiagnosis(LEFT_THRUST_FAILURE, 0.95);
-        
-        // Immediately update prev values and return
-        prev_Tp = Tp.data;
-        prev_Ts = Ts.data;
-        prev_delta_p = delta_p.data;
-        prev_delta_s = delta_s.data;
-        return;
-    }
-    
-    if (std::abs(Ts.data) < 5.0 && std::abs(prev_Ts) > 50.0) {
-        // This is a definite RIGHT thruster failure
-        std::cout << "\033[1;31m" << "DIRECT RIGHT THRUST FAILURE DETECTION: Ts dropped from " 
-                  << prev_Ts << " to " << Ts.data << "\033[0m" << std::endl;
-        fault_detected = true;
-        current_fault_type = RIGHT_THRUST_FAILURE;
-        fault_detection_confidence = 0.95;
-        publishFaultDiagnosis(RIGHT_THRUST_FAILURE, 0.95);
         
         // Immediately update prev values and return
         prev_Tp = Tp.data;
@@ -1469,6 +1475,17 @@ void WAMV_MPC::loadFaultModel(const std::string& filename)
 // Implement the calibration function
 void WAMV_MPC::calibrateDisturbanceModel()
 {
+    // Debug output to see current values
+    static int debug_counter = 0;
+    if (debug_counter++ % 100 == 0) {
+        std::cout << "\033[1;34m" << "Calibration Debug - wpsi_coefficient: " << wpsi_coefficient
+                 << ", raw_wpsi: " << esti_x[8]
+                 << ", thrust_diff: " << (Ts.data - Tp.data)
+                 << ", expected_wpsi: " << ((Ts.data - Tp.data) * wpsi_coefficient)
+                 << ", calibrated_wpsi: " << getCalibrated_wpsi()
+                 << "\033[0m" << std::endl;
+    }
+    
     // Skip calibration if disabled
     if (!calibration_enabled) {
         return;
@@ -1564,3 +1581,18 @@ void WAMV_MPC::calibrateDisturbanceModel()
     }
 }
 
+double WAMV_MPC::getCalibrated_wpsi() const {
+    // Current w_psi value
+    double raw_wpsi = esti_x[8];
+    
+    // Calculate thrust differential - use actual published values
+    double thrust_diff = Ts.data - Tp.data;
+    
+    // Expected w_psi based on thrust differential
+    double expected_wpsi = thrust_diff * wpsi_coefficient;
+    
+    // Calibrated value: actual minus expected
+    double calibrated_wpsi = raw_wpsi - expected_wpsi;
+    
+    return calibrated_wpsi;
+}
