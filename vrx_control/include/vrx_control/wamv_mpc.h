@@ -279,6 +279,7 @@ class WAMV_MPC : public rclcpp::Node
     std::vector<double> fault_confidences; // Vector to store confidence values for each fault type
     bool warmup_completed = false;
     const size_t warmup_iterations = 180;
+    std::deque<Vector4d> command_history; // For tracking thrust command history
     
 
     public:
