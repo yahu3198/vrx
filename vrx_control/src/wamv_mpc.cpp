@@ -122,6 +122,9 @@ WAMV_MPC::WAMV_MPC()
     // Add publisher for the coefficient
     wpsi_coefficient_pub = this->create_publisher<std_msgs::msg::Float64>(
         "/wamv/wpsi_coefficient", 10);
+
+    fault_confidence_pub = this->create_publisher<std_msgs::msg::Float64MultiArray>(
+        "/wamv/fault_confidences", 10);
     
     // Initialize calibration data with reserved capacity
     calibration_data.reserve(1000);
@@ -136,7 +139,7 @@ WAMV_MPC::WAMV_MPC()
     prev_delta_s = 0.0;
 
     // Initialize confidences
-    fault_confidences.resize(5, 0.0); // Initialize with 5 zeros (one for each fault type)
+    fault_confidences.resize(3, 0.0); // Initialize with 3 zeros (one for each fault type)
 }
 
 // subscribe pos and vel
@@ -448,14 +451,6 @@ void WAMV_MPC::solve()
                 fault_status = "RIGHT_THRUST_FAILURE";
                 fault_color = "\033[31m"; // Red
                 break;
-            case LEFT_ANGLE_FAILURE:
-                fault_status = "LEFT_ANGLE_FAILURE";
-                fault_color = "\033[33m"; // Yellow
-                break;
-            case RIGHT_ANGLE_FAILURE:
-                fault_status = "RIGHT_ANGLE_FAILURE";
-                fault_color = "\033[33m"; // Yellow
-                break;
             default:
                 fault_status = "UNKNOWN_FAULT";
                 fault_color = "\033[35m"; // Magenta
@@ -514,30 +509,52 @@ void WAMV_MPC::publish_cin(double Tp_mpc, double Ts_mpc, double delta_p_mpc, dou
         // Normal operation before fault trigger
         Tp.data = Tp_mpc;
         Ts.data = Ts_mpc;
+        
+        // Reset simulation tracking
+        fault_simulation_active = false;
+        simulated_fault_type = NO_FAULT;
     } else {
         // Apply the selected fault simulation
         switch (FAULT_TYPE_TO_SIMULATE) {
             case LEFT_THRUSTER_FAULT_SIM:
                 Tp.data = 0.0;     // Port thruster fails (no force)
                 Ts.data = Ts_mpc;  // Starboard thruster normal
+                
+                // Track the simulation state
+                fault_simulation_active = true;
+                simulated_fault_type = LEFT_THRUST_FAILURE;
+                
                 RCLCPP_INFO(this->get_logger(), "Simulating port thruster force failure at iteration %zu", iteration_count);
                 break;
                 
             case RIGHT_THRUSTER_FAULT_SIM:
                 Tp.data = Tp_mpc;  // Port thruster normal
                 Ts.data = 0.0;     // Starboard thruster fails (no force)
+                
+                // Track the simulation state
+                fault_simulation_active = true;
+                simulated_fault_type = RIGHT_THRUST_FAILURE;
+                
                 RCLCPP_INFO(this->get_logger(), "Simulating starboard thruster force failure at iteration %zu", iteration_count);
                 break;
                 
             case BOTH_THRUSTERS_FAULT_SIM:
                 Tp.data = 0.0;     // Port thruster fails
                 Ts.data = 0.0;     // Starboard thruster fails
+                
+                // Not tracking this case specifically
+                fault_simulation_active = true;
+                simulated_fault_type = LEFT_THRUST_FAILURE; // Arbitrary choice
+                
                 RCLCPP_INFO(this->get_logger(), "Simulating both thrusters force failure at iteration %zu", iteration_count);
                 break;
                 
             default:
                 Tp.data = Tp_mpc;  // Normal operation
                 Ts.data = Ts_mpc;
+                
+                fault_simulation_active = false;
+                simulated_fault_type = NO_FAULT;
                 break;
         }
     }
@@ -1163,84 +1180,216 @@ void WAMV_MPC::extractFeatures(VectorXd& features) {
 
 // Detect faults based on extracted features
 bool WAMV_MPC::detectFault(const VectorXd& features, int& fault_type, std::vector<double>& fault_confidences) {
-    // Get key pattern indicators from features
-    bool pattern_change = features[6] > 0.5;
-    double wpsi_accel = features[7];
-    bool steady_state = features[8] > 0.5;
-    bool thrust_unchanged = features[9] > 0.5;
-    bool wpsi_spike = features[10] > 0.5;  // Early warning sign
-    double wpsi = features[2];
-    double very_recent_wpsi = features[3];
-    // double recent_wpsi = features[4];
-    double older_wpsi = features[5];
-    
-    // Track how long a pattern change has persisted
-    static bool previous_pattern_change = false;
-    static double pattern_change_duration = 0.0;
-    
-    if (pattern_change) {
-        if (previous_pattern_change) {
-            pattern_change_duration += dt;  // Duration increases
-        } else {
-            pattern_change_duration = dt;  // Reset duration
-        }
-    } else {
-        pattern_change_duration = 0.0;
-    }
-    previous_pattern_change = pattern_change;
-    
-    // Use ultra-sensitive thresholds for faster detection
-    double adjusted_threshold = wpsi_threshold * std::max(0.2, 0.4 - pattern_change_duration/2.0);
-    
-    // Check for directional change (sign reversal or significant deceleration)
-    bool direction_change = (very_recent_wpsi * older_wpsi < 0) || 
-                           (std::abs(wpsi_accel) > 0.15);
-    
-    // Ultra-sensitive criteria for thrust failures:
-    // 1. Spike in wpsi OR pattern change with direction change
-    // 2. Thrust commands unchanged
-    // 3. Not in steady state
-    // 4. wpsi has some magnitude
-    bool fault_criteria_met = thrust_unchanged && 
-                             !steady_state &&
-                             ((wpsi_spike || (pattern_change && direction_change)) &&
-                              (std::abs(wpsi) > adjusted_threshold * 0.8 || 
-                               std::abs(very_recent_wpsi) > adjusted_threshold * 0.8));
-    
-    // Determine fault type based on wpsi direction
-    if (fault_criteria_met) {
-        if (wpsi > 0 || very_recent_wpsi > 0) {
-            fault_type = LEFT_THRUST_FAILURE;
-            fault_confidences[LEFT_THRUST_FAILURE] = 0.7 + 0.3 * std::min(1.0, std::abs(wpsi_accel) * 5);
-            fault_confidences[RIGHT_THRUST_FAILURE] = 0.1;
-        } else {
-            fault_type = RIGHT_THRUST_FAILURE;
-            fault_confidences[RIGHT_THRUST_FAILURE] = 0.7 + 0.3 * std::min(1.0, std::abs(wpsi_accel) * 5);
-            fault_confidences[LEFT_THRUST_FAILURE] = 0.1;
-        }
-        
-        // Set confidences for other fault types
-        fault_confidences[NO_FAULT] = 0.1;
-        fault_confidences[LEFT_ANGLE_FAILURE] = 0.05;
-        fault_confidences[RIGHT_ANGLE_FAILURE] = 0.05;
-        
-        // Debug output for diagnostics
-        RCLCPP_INFO(this->get_logger(), 
-            "FAULT DETECTED - type: %d, wpsi: %.3f, v_recent_wpsi: %.3f, "
-            "pattern_change: %d, dir_change: %d, spike: %d, adjusted_threshold: %.3f",
-            fault_type, wpsi, very_recent_wpsi, pattern_change, 
-            direction_change, wpsi_spike, adjusted_threshold);
-        
-        return true;
-    } else {
-        // No fault detected
+    // Skip detection during warmup period when EKF is still stabilizing
+    if (iteration_count < warmup_iterations) {
         fault_type = NO_FAULT;
+        fault_confidences.resize(3, 0.0);
         fault_confidences[NO_FAULT] = 0.9;
-        fault_confidences[LEFT_THRUST_FAILURE] = 0.025;
-        fault_confidences[RIGHT_THRUST_FAILURE] = 0.025;
-        fault_confidences[LEFT_ANGLE_FAILURE] = 0.025;
-        fault_confidences[RIGHT_ANGLE_FAILURE] = 0.025;
+        fault_confidences[LEFT_THRUST_FAILURE] = 0.05;
+        fault_confidences[RIGHT_THRUST_FAILURE] = 0.05;
         return false;
+    }
+
+    // Initialize history buffers for tracking trend
+    static std::deque<double> wpsi_history;
+    static std::deque<double> wx_history;
+    static std::deque<double> wy_history;
+    
+    // Add current values to history
+    double wx = esti_x[6];
+    double wy = esti_x[7];
+    double wpsi = esti_x[8];
+    
+    wx_history.push_back(wx);
+    wy_history.push_back(wy);
+    wpsi_history.push_back(wpsi);
+    
+    // Keep history to a reasonable size
+    const size_t MAX_HISTORY = 10;
+    if (wx_history.size() > MAX_HISTORY) {
+        wx_history.pop_front();
+        wy_history.pop_front();
+        wpsi_history.pop_front();
+    }
+    
+    // Calculate recent trends (for last 3 points)
+    double wpsi_trend1 = 0;
+    double wpsi_trend2 = 0;
+    
+    // Need at least 4 points for two sequential trends
+    if (wpsi_history.size() >= 4) {
+        // First trend (previous 3 points)
+        wpsi_trend1 = wpsi_history[wpsi_history.size() - 2] - wpsi_history[wpsi_history.size() - 4];
+        
+        // Second trend (most recent 3 points)
+        wpsi_trend2 = wpsi_history[wpsi_history.size() - 1] - wpsi_history[wpsi_history.size() - 3];
+    }
+    
+    // Check for trend reversals (sign change in consecutive trends)
+    bool wpsi_turning_point = (wpsi_trend1 * wpsi_trend2 < 0) && 
+                             (std::abs(wpsi_trend1) > 0.1) && 
+                             (std::abs(wpsi_trend2) > 0.1);
+    
+    // Calculate current rate of change in wpsi
+    double current_wpsi_slope = 0;
+    if (wpsi_history.size() >= 3) {
+        current_wpsi_slope = wpsi_history.back() - wpsi_history[wpsi_history.size() - 3];
+    }
+    
+    // Log buffer contents for debugging
+    std::string wpsi_buffer_str = "wpsi_buffer: ";
+    for (double val : wpsi_history) {
+        wpsi_buffer_str += std::to_string(val) + " ";
+    }
+    RCLCPP_INFO(this->get_logger(), "%s", wpsi_buffer_str.c_str());
+    
+    // Log turning point and trend information
+    RCLCPP_INFO(this->get_logger(), 
+        "Trends: wpsi_trend1=%.3f, wpsi_trend2=%.3f, slope=%.3f, turning_point=%s",
+        wpsi_trend1, wpsi_trend2, current_wpsi_slope, 
+        wpsi_turning_point ? "YES" : "NO");
+    
+    // Initialize fault confidences to default values
+    fault_confidences.resize(3, 0.0);
+    fault_confidences[NO_FAULT] = 0.8;
+    fault_confidences[LEFT_THRUST_FAILURE] = 0.1;
+    fault_confidences[RIGHT_THRUST_FAILURE] = 0.1;
+    
+    // ===== SIMPLE TREND-BASED FAULT DETECTION =====
+    
+    // Also check for abrupt change in slope direction
+    bool significant_slope_change = false;
+    static double prev_slope = 0;
+    
+    if (std::abs(current_wpsi_slope) > 0.1) {
+        // If previous slope had opposite sign and significant magnitude
+        if (prev_slope * current_wpsi_slope < 0 && std::abs(prev_slope) > 0.1) {
+            significant_slope_change = true;
+            RCLCPP_INFO(this->get_logger(), "Significant slope change detected: %.3f -> %.3f",
+                       prev_slope, current_wpsi_slope);
+        }
+        // Update previous slope
+        prev_slope = current_wpsi_slope;
+    }
+    
+    // Raw fault detection based on turning point or significant slope change
+    bool raw_fault_detected = wpsi_turning_point || significant_slope_change;
+    int raw_fault_type = NO_FAULT;
+    
+    if (raw_fault_detected) {
+        // Analyze current configuration
+        bool is_forward_motion = (std::abs(delta_p.data) < 0.2 && std::abs(delta_s.data) < 0.2);
+        bool is_right_turn = (delta_p.data > 1.0 && delta_s.data > 1.0);
+        bool is_left_turn = (delta_p.data < -1.0 && delta_s.data < -1.0);
+        
+        // Determine fault type based on trend direction after the turning point
+        if (is_forward_motion) {
+            // For forward motion: slope direction after turning point indicates fault type
+            raw_fault_type = (current_wpsi_slope > 0) ? LEFT_THRUST_FAILURE : RIGHT_THRUST_FAILURE;
+        }
+        else if (is_right_turn) {
+            // For right turn: change from negative to positive slope -> RIGHT thruster failure
+            //                  change from positive to negative slope -> LEFT thruster failure
+            raw_fault_type = (current_wpsi_slope > 0) ? RIGHT_THRUST_FAILURE : LEFT_THRUST_FAILURE;
+        }
+        else if (is_left_turn) {
+            // For left turn: change from negative to positive slope -> LEFT thruster failure
+            //                 change from positive to negative slope -> RIGHT thruster failure
+            raw_fault_type = (current_wpsi_slope > 0) ? LEFT_THRUST_FAILURE : RIGHT_THRUST_FAILURE;
+        }
+        else {
+            // For complex motion: use slope direction
+            raw_fault_type = (current_wpsi_slope > 0) ? LEFT_THRUST_FAILURE : RIGHT_THRUST_FAILURE;
+        }
+        
+        RCLCPP_INFO(this->get_logger(), 
+            "FAULT DETECTED - Slope: %.3f, Raw fault type: %d",
+            current_wpsi_slope, raw_fault_type);
+    }
+    
+    // ===== FAULT STATE FILTERING =====
+    // Tracking variables (static to persist between calls)
+    static int consecutive_fault_detections = 0;
+    static int consecutive_normal_detections = 0;
+    static int last_detected_fault_type = NO_FAULT;
+    static bool fault_state_active = false;
+    
+    // Fault confirmation parameters
+    const int FAULT_CONFIRMATION_COUNT = 1;  // Only need 1 detection to confirm
+    const int NORMAL_CONFIRMATION_COUNT = 5; // Need 5 consecutive normals to clear
+    
+    // Update state counters
+    if (raw_fault_detected) {
+        if (raw_fault_type == last_detected_fault_type) {
+            consecutive_fault_detections++;
+        } else {
+            consecutive_fault_detections = 1;
+            last_detected_fault_type = raw_fault_type;
+        }
+        consecutive_normal_detections = 0;
+    } else {
+        consecutive_normal_detections++;
+        if (consecutive_normal_detections > 100) consecutive_normal_detections = 100; // Prevent overflow
+    }
+    
+    // State machine for fault status
+    if (!fault_state_active) {
+        // Currently in normal state
+        if (consecutive_fault_detections >= FAULT_CONFIRMATION_COUNT) {
+            // Confirm fault
+            fault_state_active = true;
+            fault_type = last_detected_fault_type;
+            
+            // Set confidence values
+            if (fault_type == LEFT_THRUST_FAILURE) {
+                fault_confidences[LEFT_THRUST_FAILURE] = 0.7;
+                fault_confidences[RIGHT_THRUST_FAILURE] = 0.2;
+                fault_confidences[NO_FAULT] = 0.1;
+            } else {
+                fault_confidences[RIGHT_THRUST_FAILURE] = 0.7;
+                fault_confidences[LEFT_THRUST_FAILURE] = 0.2;
+                fault_confidences[NO_FAULT] = 0.1;
+            }
+            
+            RCLCPP_INFO(this->get_logger(), 
+                "FAULT CONFIRMED - Type: %d, Consecutive detections: %d",
+                fault_type, consecutive_fault_detections);
+                
+            return true;
+        } else {
+            // Stay in normal state
+            fault_type = NO_FAULT;
+            return false;
+        }
+    } else {
+        // Currently in fault state
+        if (consecutive_normal_detections >= NORMAL_CONFIRMATION_COUNT) {
+            // Clear fault after multiple normal readings
+            fault_state_active = false;
+            fault_type = NO_FAULT;
+            
+            RCLCPP_INFO(this->get_logger(), 
+                "FAULT CLEARED - After %d consecutive normal readings",
+                consecutive_normal_detections);
+                
+            return false;
+        } else {
+            // Continue reporting current fault
+            fault_type = last_detected_fault_type;
+            
+            // Set confidence values
+            if (fault_type == LEFT_THRUST_FAILURE) {
+                fault_confidences[LEFT_THRUST_FAILURE] = 0.7;
+                fault_confidences[RIGHT_THRUST_FAILURE] = 0.2;
+                fault_confidences[NO_FAULT] = 0.1;
+            } else {
+                fault_confidences[RIGHT_THRUST_FAILURE] = 0.7;
+                fault_confidences[LEFT_THRUST_FAILURE] = 0.2;
+                fault_confidences[NO_FAULT] = 0.1;
+            }
+            
+            return true;
+        }
     }
 }
 
@@ -1314,7 +1463,10 @@ Vector3d WAMV_MPC::calculateDisturbanceStats(const std::deque<Vector3d>& buffer)
 // Publish fault diagnosis results
 void WAMV_MPC::publishFaultDiagnosis(int fault_type, std::vector<double>& fault_confidences) 
 {
-    auto message = std::make_unique<std_msgs::msg::String>();
+    // Create a new message type for more detailed fault information
+    auto fault_msg = std::make_unique<std_msgs::msg::String>();
+    auto conf_msg = std::make_unique<std_msgs::msg::Float64MultiArray>();
+    
     std::string fault_str;
     
     // Get calibrated w_psi
@@ -1330,27 +1482,37 @@ void WAMV_MPC::publishFaultDiagnosis(int fault_type, std::vector<double>& fault_
         case RIGHT_THRUST_FAILURE:
             fault_str = "RIGHT_THRUST_FAILURE";
             break;
-        case LEFT_ANGLE_FAILURE:
-            fault_str = "LEFT_ANGLE_FAILURE";
-            break;
-        case RIGHT_ANGLE_FAILURE:
-            fault_str = "RIGHT_ANGLE_FAILURE";
-            break;
         default:
             fault_str = "UNKNOWN_FAULT";
     }
     
-    message->data = "Fault: " + fault_str + " (Confidence: " + 
+    // Include all confidence values in the message
+    fault_msg->data = "Fault: " + fault_str + " (Confidence: " + 
                    std::to_string(fault_confidences[fault_type] * 100.0) + "%)";
-    fault_diagnosis_pub->publish(*message);
     
-    RCLCPP_INFO(this->get_logger(), "FAULT DIAGNOSIS: %s (Confidence: %.2f%%)", 
-               fault_str.c_str(), fault_confidences[fault_type] * 100.0);
+    // Add all confidence values to the array
+    conf_msg->data.resize(3); // Only 3 fault types now
+    conf_msg->data[0] = fault_confidences[NO_FAULT];
+    conf_msg->data[1] = fault_confidences[LEFT_THRUST_FAILURE];
+    conf_msg->data[2] = fault_confidences[RIGHT_THRUST_FAILURE];
+    
+    // Publish both messages
+    fault_diagnosis_pub->publish(*fault_msg);
+    fault_confidence_pub->publish(*conf_msg);
+    
+    RCLCPP_INFO(this->get_logger(), "FAULT DIAGNOSIS: %s", fault_str.c_str());
+    RCLCPP_INFO(this->get_logger(), "Confidences - NO_FAULT: %.2f%%, LEFT: %.2f%%, RIGHT: %.2f%%",
+               fault_confidences[NO_FAULT] * 100.0,
+               fault_confidences[LEFT_THRUST_FAILURE] * 100.0,
+               fault_confidences[RIGHT_THRUST_FAILURE] * 100.0);
                
     // Print additional debug info to console
-    std::cout << "\033[1;36m" << "FAULT DIAGNOSIS: " << fault_str 
-              << " (Confidence: " << std::fixed << std::setprecision(2) 
-              << fault_confidences[fault_type] * 100.0 << "%)" << "\033[0m" << std::endl;
+    std::cout << "\033[1;36m" << "FAULT DIAGNOSIS: " << fault_str << "\033[0m" << std::endl;
+    std::cout << "\033[1;36m" << "  Confidences - NO_FAULT: " << std::fixed << std::setprecision(2) 
+              << fault_confidences[NO_FAULT] * 100.0 << "%, LEFT: " 
+              << fault_confidences[LEFT_THRUST_FAILURE] * 100.0 << "%, RIGHT: "
+              << fault_confidences[RIGHT_THRUST_FAILURE] * 100.0 << "%"
+              << "\033[0m" << std::endl;
               
     // Print current disturbance values and thrusts with calibrated w_psi
     std::cout << "\033[1;36m" << "  Disturbances - w_x: " << esti_x[6] 
@@ -1535,4 +1697,99 @@ double WAMV_MPC::getCalibrated_wpsi() const {
     double calibrated_wpsi = raw_wpsi - expected_wpsi;
     
     return calibrated_wpsi;
+}
+
+WAMV_MPC::ThrusterConfiguration WAMV_MPC::analyzeThrusterConfiguration(
+    double tp, double ts, double delta_p, double delta_s) 
+{
+    ThrusterConfiguration config;
+    config.type = ThrusterConfiguration::UNKNOWN;
+    config.expected_wpsi = 0.0;
+    config.turn_direction = 0.0;
+    
+    // Classification based on thruster angles
+    bool is_forward_motion = (std::abs(delta_p) < 0.2 && std::abs(delta_s) < 0.2);
+    bool is_right_turn = (delta_p > 1.0 && delta_s > 1.0);
+    bool is_left_turn = (delta_p < -1.0 && delta_s < -1.0);
+    
+    // Calculate thrust differential
+    double thrust_diff = ts - tp;
+    
+    // Calculate approximate forces and moments
+    if (is_forward_motion) {
+        // Forward motion classification
+        config.type = ThrusterConfiguration::FORWARD;
+        
+        // In forward motion, yaw moment is primarily from thrust differential
+        config.expected_wpsi = thrust_diff * wpsi_coefficient;
+        
+        // Set minimal turn direction indicator
+        config.turn_direction = (thrust_diff > 0) ? 0.1 : -0.1;
+        
+        // For nearly identical thrusts, expect minimal yaw
+        if (std::abs(thrust_diff) < 10.0) {
+            config.expected_wpsi = 0.0;
+            config.turn_direction = 0.0;
+        }
+    }
+    else if (is_right_turn) {
+        // Right turn classification (both thrusters angled right)
+        config.type = ThrusterConfiguration::TURNING;
+        config.turn_direction = 1.0;  // Right turn
+        
+        // For right turns, expect significant positive wpsi
+        // This is just an approximate value - trend analysis is more important
+        config.expected_wpsi = 15.0;  // Typical value for (200,200,1.57,1.57)
+        
+        // Scale with thrust magnitude
+        double avg_thrust = (std::abs(tp) + std::abs(ts)) / 2.0;
+        if (avg_thrust > 0) {
+            config.expected_wpsi *= (avg_thrust / 200.0);
+        }
+    }
+    else if (is_left_turn) {
+        // Left turn classification (both thrusters angled left)
+        config.type = ThrusterConfiguration::TURNING;
+        config.turn_direction = -1.0;  // Left turn
+        
+        // For left turns, expect significant negative wpsi
+        config.expected_wpsi = -15.0;  // Approximate value
+        
+        // Scale with thrust magnitude
+        double avg_thrust = (std::abs(tp) + std::abs(ts)) / 2.0;
+        if (avg_thrust > 0) {
+            config.expected_wpsi *= (avg_thrust / 200.0);
+        }
+    }
+    else {
+        // Mixed or complex configuration
+        double angle_diff = std::abs(delta_p - delta_s);
+        bool similar_direction = angle_diff < 0.25;
+        
+        if (similar_direction) {
+            // Thrusters pointing in similar direction - likely turning
+            config.type = ThrusterConfiguration::TURNING;
+            
+            // Calculate average angle to determine turn direction
+            double avg_angle = (delta_p + delta_s) / 2.0;
+            config.turn_direction = (avg_angle > 0) ? 1.0 : -1.0;
+            
+            // Rough estimate of expected wpsi - less important for trend detection
+            config.expected_wpsi = avg_angle * 5.0;
+        }
+        else {
+            // Thrusters pointing in different directions - lateral or complex motion
+            config.type = ThrusterConfiguration::COMPLEX;
+            
+            // Rough moment calculation for complex configurations
+            double port_lateral = tp * std::sin(delta_p);
+            double stbd_lateral = ts * std::sin(delta_s);
+            double net_lateral = port_lateral + stbd_lateral;
+            
+            config.turn_direction = (net_lateral > 0) ? 0.5 : -0.5;
+            config.expected_wpsi = net_lateral * 0.05;
+        }
+    }
+    
+    return config;
 }

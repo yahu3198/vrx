@@ -46,6 +46,7 @@ public:
     void handleWpsiCoefficientMsg(const std_msgs::msg::Float64::SharedPtr msg);
     void updateTimeAxis(QChart *chart, double min_time, double max_time);
     void updateValueAxis(QChart *chart, const std::deque<double> &data);
+    void handleFaultConfidenceMsg(const std_msgs::msg::Float64MultiArray::SharedPtr msg);
 
 private slots:
     void updatePlots();
@@ -53,6 +54,17 @@ private slots:
     
 
 private:
+    QLabel *no_fault_confidence_label_;
+    QLabel *left_fault_confidence_label_;
+    QLabel *right_fault_confidence_label_;
+
+    // Add confidence values storage
+    double no_fault_confidence_ = 0.0;
+    double left_fault_confidence_ = 0.0;
+    double right_fault_confidence_ = 0.0;
+
+    // Add a new subscription for detailed confidence values
+    rclcpp::Subscription<std_msgs::msg::Float64MultiArray>::SharedPtr fault_confidence_sub_;
     // Fault tracking variables
     std::deque<bool> fault_active_history_;
     double start_time_ = 0.0;       // Reference time for plotting
@@ -126,6 +138,7 @@ private:
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr fault_diagnosis_sub_;
     rclcpp::Subscription<std_msgs::msg::Float64MultiArray>::SharedPtr fault_features_sub_;
     rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr wpsi_coefficient_sub_;
+    rclcpp::Subscription<std_msgs::msg::Float64MultiArray>::SharedPtr fault_confidence_sub_;
 
     // Pointer to the dashboard UI
     WAMVDashboard* dashboard_;

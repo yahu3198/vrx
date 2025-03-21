@@ -40,6 +40,11 @@ WAMVDashboardNode::WAMVDashboardNode(const rclcpp::NodeOptions & options)
         [this](const std_msgs::msg::Float64::SharedPtr msg) {
             if (dashboard_) dashboard_->handleWpsiCoefficientMsg(msg);
         });
+    fault_confidence_sub_ = this->create_subscription<std_msgs::msg::Float64MultiArray>(
+        "/wamv/fault_confidences", 10,
+        [this](const std_msgs::msg::Float64MultiArray::SharedPtr msg) {
+            if (dashboard_) dashboard_->handleFaultConfidenceMsg(msg);
+        });
 }
 
 void WAMVDashboardNode::setDashboard(WAMVDashboard* dashboard) {
@@ -115,7 +120,19 @@ void WAMVDashboard::setupUI()
     
     QVBoxLayout *status_text_layout = new QVBoxLayout();
     fault_status_label_ = new QLabel("Status: NO_FAULT");
-    confidence_label_ = new QLabel("Confidence: 0%");
+    
+    // Replace single confidence label with multiple confidence labels
+    QFont confidence_font;
+    confidence_font.setPointSize(10);
+    
+    no_fault_confidence_label_ = new QLabel("NO_FAULT: 0.0%");
+    no_fault_confidence_label_->setFont(confidence_font);
+    
+    left_fault_confidence_label_ = new QLabel("LEFT_THRUST: 0.0%");
+    left_fault_confidence_label_->setFont(confidence_font);
+    
+    right_fault_confidence_label_ = new QLabel("RIGHT_THRUST: 0.0%");
+    right_fault_confidence_label_->setFont(confidence_font);
     
     QFont status_font = fault_status_label_->font();
     status_font.setPointSize(12);
@@ -123,7 +140,9 @@ void WAMVDashboard::setupUI()
     fault_status_label_->setFont(status_font);
     
     status_text_layout->addWidget(fault_status_label_);
-    status_text_layout->addWidget(confidence_label_);
+    status_text_layout->addWidget(no_fault_confidence_label_);
+    status_text_layout->addWidget(left_fault_confidence_label_);
+    status_text_layout->addWidget(right_fault_confidence_label_);
     
     status_group_layout->addWidget(status_indicator_);
     status_group_layout->addLayout(status_text_layout);
@@ -248,6 +267,20 @@ void WAMVDashboard::setupCharts()
     
     trajectory_view_ = new QChartView(trajectory_chart_);
     trajectory_view_->setRenderHint(QPainter::Antialiasing);
+}
+
+void WAMVDashboard::handleFaultConfidenceMsg(const std_msgs::msg::Float64MultiArray::SharedPtr msg)
+{
+    if (msg->data.size() >= 3) {
+        no_fault_confidence_ = msg->data[0] * 100.0; // Convert to percentage
+        left_fault_confidence_ = msg->data[1] * 100.0;
+        right_fault_confidence_ = msg->data[2] * 100.0;
+        
+        // Update the labels
+        no_fault_confidence_label_->setText(QString("NO_FAULT: %1%").arg(no_fault_confidence_, 0, 'f', 1));
+        left_fault_confidence_label_->setText(QString("LEFT_THRUST: %1%").arg(left_fault_confidence_, 0, 'f', 1));
+        right_fault_confidence_label_->setText(QString("RIGHT_THRUST: %1%").arg(right_fault_confidence_, 0, 'f', 1));
+    }
 }
 
 void WAMVDashboard::handleDisturbanceMsg(const geometry_msgs::msg::TwistStamped::SharedPtr msg)
@@ -625,9 +658,6 @@ void WAMVDashboard::updateStatusDisplay()
     // Update fault status label
     fault_status_label_->setText("Status: " + QString::fromStdString(current_fault_status_));
     
-    // Update confidence label
-    confidence_label_->setText(QString("Confidence: %1%").arg(fault_confidence_, 0, 'f', 1));
-    
     // Update status indicator color
     QColor status_color = getFaultStatusColor();
     status_indicator_->setStyleSheet(QString("background-color: %1;").arg(status_color.name()));
@@ -638,11 +668,16 @@ QColor WAMVDashboard::getFaultStatusColor()
     // Choose color based on fault status and confidence
     if (current_fault_status_ == "NO_FAULT") {
         return QColor(0, 200, 0);  // Green
+    } else if (current_fault_status_ == "LEFT_THRUST_FAILURE") {
+        // Red with intensity based on confidence
+        int green = static_cast<int>(255 * (1.0 - left_fault_confidence_ / 100.0));
+        return QColor(255, green, 0);
+    } else if (current_fault_status_ == "RIGHT_THRUST_FAILURE") {
+        // Orange-red with intensity based on confidence
+        int green = static_cast<int>(255 * (1.0 - right_fault_confidence_ / 100.0));
+        return QColor(255, green, 0);
     } else {
-        // Gradient from yellow to red based on confidence
-        int red = 255;
-        int green = static_cast<int>(255 * (1.0 - fault_confidence_ / 100.0));
-        return QColor(red, green, 0);
+        return QColor(128, 128, 128);  // Gray for unknown
     }
 }
 

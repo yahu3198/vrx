@@ -65,10 +65,25 @@ class WAMV_MPC : public rclcpp::Node
     enum ThrusterFaultType {
         NO_FAULT = 0,
         LEFT_THRUST_FAILURE = 1,
-        RIGHT_THRUST_FAILURE = 2,
-        LEFT_ANGLE_FAILURE = 3,
-        RIGHT_ANGLE_FAILURE = 4
+        RIGHT_THRUST_FAILURE = 2
     };
+
+    // Thruster configuration analysis
+    struct ThrusterConfiguration {
+        enum MotionType {
+            FORWARD,        // Both thrusters forward
+            TURNING,        // Thrusters angled for turning
+            LATERAL,        // Thrusters angled for lateral motion
+            COMPLEX,        // Mixed or complex configuration
+            UNKNOWN         // Undefined configuration
+        };
+        
+        MotionType type;
+        double expected_wpsi;    // Expected yaw disturbance for this configuration
+        double turn_direction;   // +1 for right turn, -1 for left turn, 0 for straight
+    };
+    
+    ThrusterConfiguration current_config_;
 
     struct OnlineLogisticRegression {
         // Model parameters
@@ -203,6 +218,8 @@ class WAMV_MPC : public rclcpp::Node
     rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr error_pose_pub;
     rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr ekf_pose_pub;
 
+    rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr fault_confidence_pub;
+
     // Trajectory variables
     std::vector<std::vector<double>> trajectory;
     int line_number = 0;
@@ -280,6 +297,35 @@ class WAMV_MPC : public rclcpp::Node
     bool warmup_completed = false;
     const size_t warmup_iterations = 180;
     std::deque<Vector4d> command_history; // For tracking thrust command history
+
+    // Direct fault detection from simulation
+    bool fault_simulation_active = false;
+    int simulated_fault_type = NO_FAULT;
+    
+    // Improved fault tracking
+    double fault_detection_time = 0.0;
+    int consecutive_fault_detections = 0;
+    int consecutive_normal_detections = 0;
+    const int fault_confirmation_threshold = 3;  // Require this many consecutive detections
+    const int normal_confirmation_threshold = 5;  // Require more confirmations to clear a fault
+
+    // Fault detection state tracking
+    int last_detected_fault_type = NO_FAULT;
+    bool fault_state_active = false;
+    
+    // Turning point detection
+    double prev_wx = 0.0;
+    double prev_wy = 0.0;
+    double prev_wpsi = 0.0;
+    double prev_wx_trend = 0.1;
+    double prev_wy_trend = 0.1;
+    double prev_wpsi_trend = 0.1;
+    
+    // Constants for filtering
+    const int FAULT_CONFIRMATION_COUNT = 2;  // Need this many consecutive detections
+    const int NORMAL_CONFIRMATION_COUNT = 5; // Need more to clear a fault
+
+
     
 
     public:
@@ -312,6 +358,11 @@ class WAMV_MPC : public rclcpp::Node
     void loadFaultModel(const std::string& filename);
     void calibrateDisturbanceModel();
     double getCalibrated_wpsi() const;
+    ThrusterConfiguration analyzeThrusterConfiguration(double tp, double ts, double delta_p, double delta_s);
+    bool detectFaultForConfiguration(const VectorXd& features, int& fault_type, 
+        std::vector<double>& fault_confidences,
+        const ThrusterConfiguration& config);
+
 };
 
 #endif
