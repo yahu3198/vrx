@@ -82,9 +82,9 @@ WAMVDashboard::WAMVDashboard(std::shared_ptr<WAMVDashboardNode> node_ptr)
         RCLCPP_INFO(node_ptr_->get_logger(), "Starting timer");
         update_timer_->start(UPDATE_INTERVAL_MS);
         
-        // Set window properties
+        // Set window properties with larger size
         setWindowTitle("WAM-V Fault Diagnosis Dashboard");
-        resize(1200, 800);
+        resize(1600, 1200);  // Increased from 1200x800
         
         RCLCPP_INFO(node_ptr_->get_logger(), "WAMVDashboard constructor completed");
     } catch (const std::exception& e) {
@@ -113,9 +113,15 @@ void WAMVDashboard::setupUI()
     QGroupBox *status_group = new QGroupBox("Fault Diagnosis Status");
     QHBoxLayout *status_group_layout = new QHBoxLayout(status_group);
     
+    // Increase font size for the group box title
+    QFont groupBoxFont = status_group->font();
+    groupBoxFont.setPointSize(14);  // Increased from default
+    groupBoxFont.setBold(true);
+    status_group->setFont(groupBoxFont);
+    
     status_indicator_ = new QFrame();
     status_indicator_->setFrameShape(QFrame::Box);
-    status_indicator_->setFixedSize(50, 50);
+    status_indicator_->setFixedSize(70, 70);  // Increased size from 50x50
     status_indicator_->setStyleSheet("background-color: green;");
     
     QVBoxLayout *status_text_layout = new QVBoxLayout();
@@ -123,7 +129,7 @@ void WAMVDashboard::setupUI()
     
     // Replace single confidence label with multiple confidence labels
     QFont confidence_font;
-    confidence_font.setPointSize(10);
+    confidence_font.setPointSize(12);  // Increased from 10
     
     no_fault_confidence_label_ = new QLabel("NO_FAULT: 0.0%");
     no_fault_confidence_label_->setFont(confidence_font);
@@ -135,7 +141,7 @@ void WAMVDashboard::setupUI()
     right_fault_confidence_label_->setFont(confidence_font);
     
     QFont status_font = fault_status_label_->font();
-    status_font.setPointSize(12);
+    status_font.setPointSize(16);  // Increased from 12
     status_font.setBold(true);
     fault_status_label_->setFont(status_font);
     
@@ -149,6 +155,7 @@ void WAMVDashboard::setupUI()
     status_group_layout->addStretch();
     
     reset_button_ = new QPushButton("Reset Trajectory");
+    reset_button_->setFont(confidence_font);  // Match font size with confidence labels
     connect(reset_button_, &QPushButton::clicked, this, &WAMVDashboard::resetTrajectory);
     status_group_layout->addWidget(reset_button_);
     
@@ -157,47 +164,64 @@ void WAMVDashboard::setupUI()
     // Create charts
     setupCharts();
     
-     // Create layout for charts
-     QGridLayout *charts_layout = new QGridLayout();
+    // Create layout for charts
+    QGridLayout *charts_layout = new QGridLayout();
     
-     // Create container for disturbance charts
-     QVBoxLayout *disturbance_layout = new QVBoxLayout();
-     disturbance_layout->addWidget(wx_view_);
-     disturbance_layout->addWidget(wy_view_);
-     disturbance_layout->addWidget(wpsi_view_);
-     
-     // Add both layouts to the grid
-     QWidget *disturbance_widget = new QWidget();
-     disturbance_widget->setLayout(disturbance_layout);
-     
-     charts_layout->addWidget(disturbance_widget, 0, 0);
-     charts_layout->addWidget(trajectory_view_, 0, 1);
-     
-     // Set column stretch to make the trajectory view a bit larger
-     charts_layout->setColumnStretch(0, 1);
-     charts_layout->setColumnStretch(1, 1);
-     
-     // Add layouts to main layout
-     main_layout->addLayout(status_layout);
-     main_layout->addLayout(charts_layout);
-     
-     // Set central widget
-     setCentralWidget(central_widget);
+    // Create container for disturbance charts
+    QVBoxLayout *disturbance_layout = new QVBoxLayout();
+    disturbance_layout->addWidget(wx_view_);
+    disturbance_layout->addWidget(wy_view_);
+    disturbance_layout->addWidget(wpsi_view_);
+    
+    // Add both layouts to the grid
+    QWidget *disturbance_widget = new QWidget();
+    disturbance_widget->setLayout(disturbance_layout);
+    
+    charts_layout->addWidget(disturbance_widget, 0, 0);
+    charts_layout->addWidget(trajectory_view_, 0, 1);
+    
+    // Set column stretch to make the trajectory view a bit larger
+    charts_layout->setColumnStretch(0, 1);
+    charts_layout->setColumnStretch(1, 1);
+    
+    // Add layouts to main layout
+    main_layout->addLayout(status_layout);
+    main_layout->addLayout(charts_layout);
+    
+    // Set central widget
+    setCentralWidget(central_widget);
 }
 
 void WAMVDashboard::setupCharts()
 {
+    // Larger font for all chart elements
+    QFont axisFont;
+    axisFont.setPointSize(12);  // Increased from default
+    
+    QFont titleFont;
+    titleFont.setPointSize(14);  // Increased from default
+    titleFont.setBold(true);
+    
     // Setup wx chart
     wx_chart_ = new QChart();
     wx_chart_->setTitle("w_x (Linear X Disturbance)");
+    wx_chart_->setTitleFont(titleFont);
     
     wx_series_ = new QLineSeries();
     wx_series_->setName("w_x");
+    wx_series_->setPen(QPen(QColor(0, 0, 255), 3));  // Thicker blue line
     
     wx_chart_->addSeries(wx_series_);
     wx_chart_->createDefaultAxes();
     wx_chart_->axes(Qt::Horizontal).first()->setTitleText("Time (s)");
-    wx_chart_->axes(Qt::Vertical).first()->setTitleText("w_x (N)");
+    wx_chart_->axes(Qt::Vertical).first()->setTitleText("wx");  // Simplified label
+    
+    QAbstractAxis* wxXAxis = wx_chart_->axes(Qt::Horizontal).first();
+    QAbstractAxis* wxYAxis = wx_chart_->axes(Qt::Vertical).first();
+    wxXAxis->setTitleFont(axisFont);
+    wxYAxis->setTitleFont(axisFont);
+    wxXAxis->setLabelsFont(axisFont);
+    wxYAxis->setLabelsFont(axisFont);
     
     wx_view_ = new QChartView(wx_chart_);
     wx_view_->setRenderHint(QPainter::Antialiasing);
@@ -205,14 +229,23 @@ void WAMVDashboard::setupCharts()
     // Setup wy chart
     wy_chart_ = new QChart();
     wy_chart_->setTitle("w_y (Linear Y Disturbance)");
+    wy_chart_->setTitleFont(titleFont);
     
     wy_series_ = new QLineSeries();
     wy_series_->setName("w_y");
+    wy_series_->setPen(QPen(QColor(0, 0, 255), 3));  // Thicker blue line
     
     wy_chart_->addSeries(wy_series_);
     wy_chart_->createDefaultAxes();
     wy_chart_->axes(Qt::Horizontal).first()->setTitleText("Time (s)");
-    wy_chart_->axes(Qt::Vertical).first()->setTitleText("w_y (N)");
+    wy_chart_->axes(Qt::Vertical).first()->setTitleText("wy");  // Simplified label
+    
+    QAbstractAxis* wyXAxis = wy_chart_->axes(Qt::Horizontal).first();
+    QAbstractAxis* wyYAxis = wy_chart_->axes(Qt::Vertical).first();
+    wyXAxis->setTitleFont(axisFont);
+    wyYAxis->setTitleFont(axisFont);
+    wyXAxis->setLabelsFont(axisFont);
+    wyYAxis->setLabelsFont(axisFont);
     
     wy_view_ = new QChartView(wy_chart_);
     wy_view_->setRenderHint(QPainter::Antialiasing);
@@ -220,49 +253,68 @@ void WAMVDashboard::setupCharts()
     // Setup wpsi chart
     wpsi_chart_ = new QChart();
     wpsi_chart_->setTitle("w_psi (Angular Z Disturbance)");
+    wpsi_chart_->setTitleFont(titleFont);
 
     // Only create one series for the calibrated value
     wpsi_series_ = new QLineSeries();
-    wpsi_series_->setName("w_psi");  // Remove the "(calibrated)" label
+    wpsi_series_->setName("w_psi");
+    wpsi_series_->setPen(QPen(QColor(0, 0, 255), 3));  // Thicker blue line
 
     wpsi_chart_->addSeries(wpsi_series_);
     wpsi_chart_->createDefaultAxes();
     wpsi_chart_->axes(Qt::Horizontal).first()->setTitleText("Time (s)");
-    wpsi_chart_->axes(Qt::Vertical).first()->setTitleText("w_psi (Nm)");
+    wpsi_chart_->axes(Qt::Vertical).first()->setTitleText("wpsi");  // Simplified label
 
+    QAbstractAxis* wpsiXAxis = wpsi_chart_->axes(Qt::Horizontal).first();
+    QAbstractAxis* wpsiYAxis = wpsi_chart_->axes(Qt::Vertical).first();
+    wpsiXAxis->setTitleFont(axisFont);
+    wpsiYAxis->setTitleFont(axisFont);
+    wpsiXAxis->setLabelsFont(axisFont);
+    wpsiYAxis->setLabelsFont(axisFont);
+    
     wpsi_view_ = new QChartView(wpsi_chart_);
     wpsi_view_->setRenderHint(QPainter::Antialiasing);
 
-    // wx_normal_series_->setName("Normal");
-    // wx_fault_series_->setName("Fault Active");
-    // wx_transition_points_->setName("Fault Start");
-
-    // Make legends visible for all charts
-    wx_chart_->legend()->setVisible(true);
-    wy_chart_->legend()->setVisible(true);
-    wpsi_chart_->legend()->setVisible(true);
+    // Make legends visible for all charts with bigger font
+    QFont legendFont;
+    legendFont.setPointSize(12);  // Increased from default
     
+    wx_chart_->legend()->setVisible(true);
+    wx_chart_->legend()->setFont(legendFont);
+    wy_chart_->legend()->setVisible(true);
+    wy_chart_->legend()->setFont(legendFont);
+    wpsi_chart_->legend()->setVisible(true);
+    wpsi_chart_->legend()->setFont(legendFont);
     
     // Setup trajectory chart
     trajectory_chart_ = new QChart();
     trajectory_chart_->setTitle("USV Trajectory");
+    trajectory_chart_->setTitleFont(titleFont);
     
     trajectory_series_ = new QScatterSeries();
     trajectory_series_->setName("Position");
-    trajectory_series_->setMarkerSize(5);
+    trajectory_series_->setMarkerSize(10);  // Increased from 5
+    trajectory_series_->setColor(QColor(75, 0, 130));  // Bright red for better visibility
     
     trajectory_chart_->addSeries(trajectory_series_);
     trajectory_chart_->createDefaultAxes();
     trajectory_chart_->axes(Qt::Horizontal).first()->setTitleText("X Position (m)");
     trajectory_chart_->axes(Qt::Vertical).first()->setTitleText("Y Position (m)");
     
-    // Set chart axes to be equal to preserve aspect ratio
+    QAbstractAxis* trajXAxis = trajectory_chart_->axes(Qt::Horizontal).first();
+    QAbstractAxis* trajYAxis = trajectory_chart_->axes(Qt::Vertical).first();
+    trajXAxis->setTitleFont(axisFont);
+    trajYAxis->setTitleFont(axisFont);
+    trajXAxis->setLabelsFont(axisFont);
+    trajYAxis->setLabelsFont(axisFont);
+    
+    // Set chart axes to be equal to preserve aspect ratio with smaller range
     QValueAxis *x_axis = qobject_cast<QValueAxis*>(trajectory_chart_->axes(Qt::Horizontal).first());
     QValueAxis *y_axis = qobject_cast<QValueAxis*>(trajectory_chart_->axes(Qt::Vertical).first());
     
     if (x_axis && y_axis) {
-        x_axis->setRange(-50, 50);
-        y_axis->setRange(-50, 50);
+        x_axis->setRange(-10, 10);  // Reduced from -50,50 for better visibility
+        y_axis->setRange(-10, 10);  // Reduced from -50,50 for better visibility
     }
     
     trajectory_view_ = new QChartView(trajectory_chart_);
@@ -420,16 +472,30 @@ void WAMVDashboard::updatePlots()
                 double min_y = *std::min_element(trajectory_y_.begin(), trajectory_y_.end());
                 double max_y = *std::max_element(trajectory_y_.begin(), trajectory_y_.end());
                 
-                // Add some margin
-                double margin_x = std::max(10.0, (max_x - min_x) * 0.1);
-                double margin_y = std::max(10.0, (max_y - min_y) * 0.1);
+                // Calculate the trajectory bounds
+                double x_range = max_x - min_x;
+                double y_range = max_y - min_y;
+                double max_range = std::max(x_range, y_range);
+                
+                // Add smaller margin for tighter framing
+                double margin = std::max(5.0, max_range * 0.15);
+                
+                // Calculate the center point
+                double center_x = (min_x + max_x) / 2.0;
+                double center_y = (min_y + max_y) / 2.0;
+                
+                // Set symmetric bounds around the center point
+                double new_min_x = center_x - max_range / 2.0 - margin;
+                double new_max_x = center_x + max_range / 2.0 + margin;
+                double new_min_y = center_y - max_range / 2.0 - margin;
+                double new_max_y = center_y + max_range / 2.0 + margin;
                 
                 QValueAxis *x_axis = qobject_cast<QValueAxis*>(trajectory_chart_->axes(Qt::Horizontal).first());
                 QValueAxis *y_axis = qobject_cast<QValueAxis*>(trajectory_chart_->axes(Qt::Vertical).first());
                 
                 if (x_axis && y_axis) {
-                    x_axis->setRange(min_x - margin_x, max_x + margin_x);
-                    y_axis->setRange(min_y - margin_y, max_y + margin_y);
+                    x_axis->setRange(new_min_x, new_max_x);
+                    y_axis->setRange(new_min_y, new_max_y);
                 }
             }
         }
@@ -441,12 +507,12 @@ void WAMVDashboard::updatePlots()
             QLineSeries *wx_fault_series = new QLineSeries();
             QScatterSeries *wx_transition_points = new QScatterSeries();
             
-            // Set colors and styles
-            QPen normalPen(QColor(0, 0, 255));  // Blue
-            normalPen.setWidth(2);
+            // Set colors and styles with thicker lines
+            QPen normalPen(QColor(0, 100, 255));  // Darker blue
+            normalPen.setWidth(3);  // Thicker line
             
-            QPen faultPen(QColor(255, 0, 0));   // Red
-            faultPen.setWidth(2);
+            QPen faultPen(QColor(255, 50, 50));   // Brighter red
+            faultPen.setWidth(3);  // Thicker line
             
             wx_normal_series->setPen(normalPen);
             wx_normal_series->setName("Normal");
@@ -454,8 +520,8 @@ void WAMVDashboard::updatePlots()
             wx_fault_series->setPen(faultPen);
             wx_fault_series->setName("Fault Active");
             
-            wx_transition_points->setMarkerSize(8);
-            wx_transition_points->setColor(QColor(255, 255, 0));  // Yellow
+            wx_transition_points->setMarkerSize(12);  // Increased from 8
+            wx_transition_points->setColor(QColor(255, 200, 0));  // Brighter yellow
             wx_transition_points->setName("Fault Start");
             
             // Fill the series with data
@@ -484,7 +550,15 @@ void WAMVDashboard::updatePlots()
             // Re-attach axes
             wx_chart_->createDefaultAxes();
             wx_chart_->axes(Qt::Horizontal).first()->setTitleText("Time (s)");
-            wx_chart_->axes(Qt::Vertical).first()->setTitleText("w_x Value");
+            wx_chart_->axes(Qt::Vertical).first()->setTitleText("wx");  // Simplified label
+            
+            // Set larger fonts for axes
+            QFont axisFont;
+            axisFont.setPointSize(12);
+            wx_chart_->axes(Qt::Horizontal).first()->setTitleFont(axisFont);
+            wx_chart_->axes(Qt::Vertical).first()->setTitleFont(axisFont);
+            wx_chart_->axes(Qt::Horizontal).first()->setLabelsFont(axisFont);
+            wx_chart_->axes(Qt::Vertical).first()->setLabelsFont(axisFont);
             
             // Update time axis range
             QValueAxis *x_axis = qobject_cast<QValueAxis*>(wx_chart_->axes(Qt::Horizontal).first());
@@ -498,19 +572,19 @@ void WAMVDashboard::updatePlots()
             updateValueAxis(wx_chart_, wx_data_);
         }
         
-        // Update wy chart with color-coded series
+        // Update wy chart with color-coded series (same changes as for wx chart)
         if (wy_chart_ && !wy_data_.empty() && !time_data_.empty()) {
             // Create separate series for normal and fault conditions
             QLineSeries *wy_normal_series = new QLineSeries();
             QLineSeries *wy_fault_series = new QLineSeries();
             QScatterSeries *wy_transition_points = new QScatterSeries();
             
-            // Set colors and styles
-            QPen normalPen(QColor(0, 0, 255));  // Blue
-            normalPen.setWidth(2);
+            // Set colors and styles with thicker lines
+            QPen normalPen(QColor(0, 100, 255));  // Darker blue
+            normalPen.setWidth(3);  // Thicker line
             
-            QPen faultPen(QColor(255, 0, 0));   // Red
-            faultPen.setWidth(2);
+            QPen faultPen(QColor(255, 50, 50));   // Brighter red
+            faultPen.setWidth(3);  // Thicker line
             
             wy_normal_series->setPen(normalPen);
             wy_normal_series->setName("Normal");
@@ -518,8 +592,8 @@ void WAMVDashboard::updatePlots()
             wy_fault_series->setPen(faultPen);
             wy_fault_series->setName("Fault Active");
             
-            wy_transition_points->setMarkerSize(8);
-            wy_transition_points->setColor(QColor(255, 255, 0));  // Yellow
+            wy_transition_points->setMarkerSize(12);  // Increased from 8
+            wy_transition_points->setColor(QColor(255, 200, 0));  // Brighter yellow
             wy_transition_points->setName("Fault Start");
             
             // Fill the series with data
@@ -548,7 +622,15 @@ void WAMVDashboard::updatePlots()
             // Re-attach axes
             wy_chart_->createDefaultAxes();
             wy_chart_->axes(Qt::Horizontal).first()->setTitleText("Time (s)");
-            wy_chart_->axes(Qt::Vertical).first()->setTitleText("w_y Value");
+            wy_chart_->axes(Qt::Vertical).first()->setTitleText("wy");  // Simplified label
+            
+            // Set larger fonts for axes
+            QFont axisFont;
+            axisFont.setPointSize(12);
+            wy_chart_->axes(Qt::Horizontal).first()->setTitleFont(axisFont);
+            wy_chart_->axes(Qt::Vertical).first()->setTitleFont(axisFont);
+            wy_chart_->axes(Qt::Horizontal).first()->setLabelsFont(axisFont);
+            wy_chart_->axes(Qt::Vertical).first()->setLabelsFont(axisFont);
             
             // Update time axis range
             QValueAxis *x_axis = qobject_cast<QValueAxis*>(wy_chart_->axes(Qt::Horizontal).first());
@@ -562,19 +644,19 @@ void WAMVDashboard::updatePlots()
             updateValueAxis(wy_chart_, wy_data_);
         }
         
-        // Update wpsi chart with color-coded series
+        // Update wpsi chart with color-coded series (same changes as for other charts)
         if (wpsi_chart_ && !wpsi_calibrated_data_.empty() && !time_data_.empty()) {
             // Create separate series for normal and fault conditions
             QLineSeries *wpsi_normal_series = new QLineSeries();
             QLineSeries *wpsi_fault_series = new QLineSeries();
             QScatterSeries *wpsi_transition_points = new QScatterSeries();
             
-            // Set colors and styles
-            QPen normalPen(QColor(0, 0, 255));  // Blue
-            normalPen.setWidth(2);
+            // Set colors and styles with thicker lines
+            QPen normalPen(QColor(0, 100, 255));  // Darker blue
+            normalPen.setWidth(3);  // Thicker line
             
-            QPen faultPen(QColor(255, 0, 0));   // Red
-            faultPen.setWidth(2);
+            QPen faultPen(QColor(255, 50, 50));   // Brighter red
+            faultPen.setWidth(3);  // Thicker line
             
             wpsi_normal_series->setPen(normalPen);
             wpsi_normal_series->setName("Normal");
@@ -582,8 +664,8 @@ void WAMVDashboard::updatePlots()
             wpsi_fault_series->setPen(faultPen);
             wpsi_fault_series->setName("Fault Active");
             
-            wpsi_transition_points->setMarkerSize(8);
-            wpsi_transition_points->setColor(QColor(255, 255, 0));  // Yellow
+            wpsi_transition_points->setMarkerSize(12);  // Increased from 8
+            wpsi_transition_points->setColor(QColor(255, 200, 0));  // Brighter yellow
             wpsi_transition_points->setName("Fault Start");
             
             // Fill the series with data
@@ -612,7 +694,15 @@ void WAMVDashboard::updatePlots()
             // Re-attach axes
             wpsi_chart_->createDefaultAxes();
             wpsi_chart_->axes(Qt::Horizontal).first()->setTitleText("Time (s)");
-            wpsi_chart_->axes(Qt::Vertical).first()->setTitleText("w_psi Value");
+            wpsi_chart_->axes(Qt::Vertical).first()->setTitleText("wpsi");  // Simplified label
+            
+            // Set larger fonts for axes
+            QFont axisFont;
+            axisFont.setPointSize(12);
+            wpsi_chart_->axes(Qt::Horizontal).first()->setTitleFont(axisFont);
+            wpsi_chart_->axes(Qt::Vertical).first()->setTitleFont(axisFont);
+            wpsi_chart_->axes(Qt::Horizontal).first()->setLabelsFont(axisFont);
+            wpsi_chart_->axes(Qt::Vertical).first()->setLabelsFont(axisFont);
             
             // Update time axis range
             QValueAxis *x_axis = qobject_cast<QValueAxis*>(wpsi_chart_->axes(Qt::Horizontal).first());

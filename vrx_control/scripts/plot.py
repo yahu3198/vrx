@@ -3,6 +3,7 @@ import numpy as np
 from rosbag2_py import SequentialReader, StorageOptions, ConverterOptions
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import TwistStamped
+from std_msgs.msg import Float64MultiArray
 from transforms3d.euler import quat2euler
 import rclpy
 from rclpy.serialization import deserialize_message
@@ -45,6 +46,11 @@ def read_bag_data(bag_dir):
     disturbance_y = []
     disturbance_psi = []
     disturbance_time = []
+
+    confidence_no_fault = []
+    confidence_left_fault = []
+    confidence_right_fault = []
+    confidence_time = []
 
     # Setup ROS 2 bag reader
     storage_options = StorageOptions(
@@ -120,6 +126,14 @@ def read_bag_data(bag_dir):
             ekf_twist_y.append(msg.twist.twist.linear.y)
             ekf_twist_psi.append(msg.twist.twist.angular.z)
             ekf_pose_time.append(timestamp_sec)
+        
+        elif topic == '/wamv/fault_confidences':
+            msg = deserialize_message(data, Float64MultiArray)
+            if len(msg.data) >= 3:
+                confidence_no_fault.append(msg.data[0])
+                confidence_left_fault.append(msg.data[1])
+                confidence_right_fault.append(msg.data[2])
+                confidence_time.append(timestamp_sec)
 
     return (error_pose_x, error_pose_y, error_pose_yaw, error_pose_time,
             ref_pose_x, ref_pose_y, ref_pose_yaw, ref_pose_time,
@@ -128,7 +142,8 @@ def read_bag_data(bag_dir):
             ekf_pose_x, ekf_pose_y, ekf_pose_yaw, ekf_pose_time,
             ekf_twist_x, ekf_twist_y, ekf_twist_psi,
             left_thrust_angle, right_thrust_angle, left_thrust_cmd, right_thrust_cmd, control_inputs_time,
-            disturbance_x, disturbance_y, disturbance_psi, disturbance_time)
+            disturbance_x, disturbance_y, disturbance_psi, disturbance_time,
+            confidence_no_fault, confidence_left_fault, confidence_right_fault, confidence_time)
 
 def plot_data(error_pose_x, error_pose_y, error_pose_yaw, error_pose_time,
               ref_pose_x, ref_pose_y, ref_pose_yaw, ref_pose_time,
@@ -137,7 +152,8 @@ def plot_data(error_pose_x, error_pose_y, error_pose_yaw, error_pose_time,
               ekf_pose_x, ekf_pose_y, ekf_pose_yaw, ekf_pose_time,
               ekf_twist_x, ekf_twist_y, ekf_twist_psi,
               left_thrust_angle, right_thrust_angle, left_thrust_cmd, right_thrust_cmd, control_inputs_time,
-              disturbance_x, disturbance_y, disturbance_psi, disturbance_time):
+              disturbance_x, disturbance_y, disturbance_psi, disturbance_time,
+              confidence_no_fault, confidence_left_fault, confidence_right_fault, confidence_time):
     # Plot Figure 1: Error States
     # fig, axs = plt.subplots(3, 1, figsize=(10, 10))
     # fig.suptitle('Error States')
@@ -282,11 +298,35 @@ def plot_data(error_pose_x, error_pose_y, error_pose_yaw, error_pose_time,
         ax.set_xlabel("Time (s)")
     plt.tight_layout()
 
+    # Plot Figure 7: Fault Confidences
+    fig7, axs7 = plt.subplots(3, 1, figsize=(10, 10))
+    fig7.suptitle('Fault Confidences')
+
+    axs7[0].plot(confidence_time, confidence_no_fault, 'g-', label="No Fault")
+    axs7[0].set_ylabel("No Fault Confidence")
+    axs7[0].legend()
+    axs7[0].set_ylim(0, 1)
+
+    axs7[1].plot(confidence_time, confidence_left_fault, 'r-', label="Left Thrust Fault")
+    axs7[1].set_ylabel("Left Thrust Fault Confidence")
+    axs7[1].legend()
+    axs7[1].set_ylim(0, 1)
+
+    axs7[2].plot(confidence_time, confidence_right_fault, 'b-', label="Right Thrust Fault")
+    axs7[2].set_ylabel("Right Thrust Fault Confidence")
+    axs7[2].set_xlabel("Time (s)")
+    axs7[2].legend()
+    axs7[2].set_ylim(0, 1)
+
+    plt.tight_layout()
+
+    plt.show()
+
     plt.show()
 
 def main():
     # Specify your bag folder path
-    bag_dir = 'forward0316_2'  # Adjust this to your actual path, e.g., '/path/to/forward0303_0'
+    bag_dir = 'fdvel15'  # Adjust this to your actual path, e.g., '/path/to/forward0303_0'
 
     # Initialize rclpy for message deserialization
     rclpy.init()
