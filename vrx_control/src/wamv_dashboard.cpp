@@ -667,17 +667,21 @@ QColor WAMVDashboard::getFaultStatusColor()
 {
     // Choose color based on fault status and confidence
     if (current_fault_status_ == "NO_FAULT") {
-        return QColor(0, 200, 0);  // Green
-    } else if (current_fault_status_ == "LEFT_THRUST_FAILURE") {
-        // Red with intensity based on confidence
-        int green = static_cast<int>(255 * (1.0 - left_fault_confidence_ / 100.0));
-        return QColor(255, green, 0);
-    } else if (current_fault_status_ == "RIGHT_THRUST_FAILURE") {
-        // Orange-red with intensity based on confidence
-        int green = static_cast<int>(255 * (1.0 - right_fault_confidence_ / 100.0));
-        return QColor(255, green, 0);
-    } else {
-        return QColor(128, 128, 128);  // Gray for unknown
+        return QColor(0, 200, 0);  // Green for normal status
+    } 
+    else if (current_fault_status_ == "LEFT_THRUST_FAILURE") {
+        // Red with intensity based on confidence (darker red for higher confidence)
+        int green = static_cast<int>(100 * (1.0 - left_fault_confidence_ / 100.0));
+        return QColor(255, green, 0);  // Red for left thrust failure
+    } 
+    else if (current_fault_status_ == "RIGHT_THRUST_FAILURE") {
+        // Also use red for right thrust failure (previously would have been yellowish)
+        int green = static_cast<int>(100 * (1.0 - right_fault_confidence_ / 100.0));
+        return QColor(255, green, 0);  // Red for right thrust failure
+    } 
+    else {
+        // Gray for unknown status
+        return QColor(128, 128, 128);
     }
 }
 
