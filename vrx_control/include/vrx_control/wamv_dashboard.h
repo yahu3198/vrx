@@ -81,6 +81,7 @@ private:
     std::deque<double> time_data_;
     std::vector<double> trajectory_x_;
     std::vector<double> trajectory_y_;
+    std::vector<double> trajectory_yaw_;  // To store yaw (orientation) values
     
     // Current fault status
     std::string current_fault_status_;
@@ -102,6 +103,7 @@ private:
     QChart *trajectory_chart_;
     QChartView *trajectory_view_;
     QScatterSeries *trajectory_series_;
+    QScatterSeries *vessel_orientation_series_; // Current vessel position marker
     
     QLabel *fault_status_label_;
     QLabel *confidence_label_;

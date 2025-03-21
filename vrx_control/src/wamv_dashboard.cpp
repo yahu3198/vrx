@@ -194,12 +194,12 @@ void WAMVDashboard::setupUI()
 
 void WAMVDashboard::setupCharts()
 {
-    // Larger font for all chart elements
+    // Font settings for better readability
     QFont axisFont;
-    axisFont.setPointSize(12);  // Increased from default
+    axisFont.setPointSize(12);
     
     QFont titleFont;
-    titleFont.setPointSize(14);  // Increased from default
+    titleFont.setPointSize(14);
     titleFont.setBold(true);
     
     // Setup wx chart
@@ -226,7 +226,7 @@ void WAMVDashboard::setupCharts()
     wx_view_ = new QChartView(wx_chart_);
     wx_view_->setRenderHint(QPainter::Antialiasing);
     
-    // Setup wy chart
+    // Setup wy chart (similar font changes)
     wy_chart_ = new QChart();
     wy_chart_->setTitle("w_y (Linear Y Disturbance)");
     wy_chart_->setTitleFont(titleFont);
@@ -250,12 +250,11 @@ void WAMVDashboard::setupCharts()
     wy_view_ = new QChartView(wy_chart_);
     wy_view_->setRenderHint(QPainter::Antialiasing);
     
-    // Setup wpsi chart
+    // Setup wpsi chart (similar font changes)
     wpsi_chart_ = new QChart();
     wpsi_chart_->setTitle("w_psi (Angular Z Disturbance)");
     wpsi_chart_->setTitleFont(titleFont);
 
-    // Only create one series for the calibrated value
     wpsi_series_ = new QLineSeries();
     wpsi_series_->setName("w_psi");
     wpsi_series_->setPen(QPen(QColor(0, 0, 255), 3));  // Thicker blue line
@@ -277,7 +276,7 @@ void WAMVDashboard::setupCharts()
 
     // Make legends visible for all charts with bigger font
     QFont legendFont;
-    legendFont.setPointSize(12);  // Increased from default
+    legendFont.setPointSize(12);
     
     wx_chart_->legend()->setVisible(true);
     wx_chart_->legend()->setFont(legendFont);
@@ -291,12 +290,22 @@ void WAMVDashboard::setupCharts()
     trajectory_chart_->setTitle("USV Trajectory");
     trajectory_chart_->setTitleFont(titleFont);
     
+    // Main trajectory series (blue dots for past positions)
     trajectory_series_ = new QScatterSeries();
-    trajectory_series_->setName("Position");
-    trajectory_series_->setMarkerSize(10);  // Increased from 5
-    trajectory_series_->setColor(QColor(75, 0, 130));  // Bright red for better visibility
+    trajectory_series_->setName("Path");
+    trajectory_series_->setMarkerSize(10);
+    trajectory_series_->setColor(QColor(75, 0, 130));  // purple
     
+    // Add a series for current vessel position (green dot)
+    vessel_orientation_series_ = new QScatterSeries();
+    vessel_orientation_series_->setName("Current Position");
+    vessel_orientation_series_->setMarkerSize(15);  // Larger marker
+    vessel_orientation_series_->setColor(QColor(0, 170, 0));  // Green
+    
+    // Add series to chart (order matters for visual layering)
     trajectory_chart_->addSeries(trajectory_series_);
+    trajectory_chart_->addSeries(vessel_orientation_series_);
+    
     trajectory_chart_->createDefaultAxes();
     trajectory_chart_->axes(Qt::Horizontal).first()->setTitleText("X Position (m)");
     trajectory_chart_->axes(Qt::Vertical).first()->setTitleText("Y Position (m)");
@@ -313,8 +322,8 @@ void WAMVDashboard::setupCharts()
     QValueAxis *y_axis = qobject_cast<QValueAxis*>(trajectory_chart_->axes(Qt::Vertical).first());
     
     if (x_axis && y_axis) {
-        x_axis->setRange(-10, 10);  // Reduced from -50,50 for better visibility
-        y_axis->setRange(-10, 10);  // Reduced from -50,50 for better visibility
+        x_axis->setRange(-20, 20);  // Reduced from -50,50 for better visibility
+        y_axis->setRange(-20, 20);  // Reduced from -50,50 for better visibility
     }
     
     trajectory_view_ = new QChartView(trajectory_chart_);
@@ -383,15 +392,34 @@ void WAMVDashboard::handleOdomMsg(const nav_msgs::msg::Odometry::SharedPtr msg)
     double x = msg->pose.pose.position.x;
     double y = msg->pose.pose.position.y;
     
+    // Extract orientation (yaw)
+    tf2::Quaternion quat(
+        msg->pose.pose.orientation.x,
+        msg->pose.pose.orientation.y,
+        msg->pose.pose.orientation.z,
+        msg->pose.pose.orientation.w);
+    
+    // Convert quaternion to RPY
+    double roll, pitch, yaw;
+    tf2::Matrix3x3(quat).getRPY(roll, pitch, yaw);
+    
     // Store trajectory points
     trajectory_x_.push_back(x);
     trajectory_y_.push_back(y);
+    trajectory_yaw_.push_back(yaw);
+    
+    // Update current vessel position marker
+    if (vessel_orientation_series_) {
+        vessel_orientation_series_->clear();
+        vessel_orientation_series_->append(x, y);
+    }
     
     // Limit data size to prevent memory issues for long runs
     const size_t MAX_TRAJECTORY_POINTS = 10000;
     if (trajectory_x_.size() > MAX_TRAJECTORY_POINTS) {
         trajectory_x_.erase(trajectory_x_.begin());
         trajectory_y_.erase(trajectory_y_.begin());
+        trajectory_yaw_.erase(trajectory_yaw_.begin());
     }
 }
 
@@ -460,11 +488,11 @@ void WAMVDashboard::updatePlots()
     try {
         // Update trajectory plot
         if (trajectory_series_ && !trajectory_x_.empty() && !trajectory_y_.empty()) {
+            // Update main trajectory series
             trajectory_series_->clear();
             for (size_t i = 0; i < trajectory_x_.size(); i++) {
                 trajectory_series_->append(trajectory_x_[i], trajectory_y_[i]);
             }
-            
             // Auto-adjust trajectory chart axes if needed
             if (!trajectory_x_.empty() && !trajectory_y_.empty()) {
                 double min_x = *std::min_element(trajectory_x_.begin(), trajectory_x_.end());
@@ -729,14 +757,19 @@ void WAMVDashboard::resetTrajectory()
     // Clear trajectory data
     trajectory_x_.clear();
     trajectory_y_.clear();
+    trajectory_yaw_.clear();
+    
+    // Clear all trajectory-related series
+    trajectory_series_->clear();
+    vessel_orientation_series_->clear();
     
     // Reset trajectory chart axes
     QValueAxis *x_axis = qobject_cast<QValueAxis*>(trajectory_chart_->axes(Qt::Horizontal).first());
     QValueAxis *y_axis = qobject_cast<QValueAxis*>(trajectory_chart_->axes(Qt::Vertical).first());
     
     if (x_axis && y_axis) {
-        x_axis->setRange(-50, 50);
-        y_axis->setRange(-50, 50);
+        x_axis->setRange(-20, 20);  // Use smaller initial range for better visibility
+        y_axis->setRange(-20, 20);
     }
     
     // Notify user
