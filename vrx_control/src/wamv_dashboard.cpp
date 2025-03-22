@@ -770,6 +770,8 @@ void WAMVDashboard::resetTrajectory()
     if (x_axis && y_axis) {
         x_axis->setRange(-20, 20);  // Use smaller initial range for better visibility
         y_axis->setRange(-20, 20);
+        x_axis->setGridLineVisible(true);
+        y_axis->setGridLineVisible(true);
     }
     
     // Notify user

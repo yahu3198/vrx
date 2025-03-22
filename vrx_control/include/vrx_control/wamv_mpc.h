@@ -195,6 +195,7 @@ class WAMV_MPC : public rclcpp::Node
 
     geometry_msgs::msg::TwistStamped control_inputs;
     geometry_msgs::msg::TwistStamped disturbance;
+    geometry_msgs::msg::TwistStamped confidence_level;
     nav_msgs::msg::Odometry ref_pose;
     nav_msgs::msg::Odometry error_pose;
     nav_msgs::msg::Odometry ekf_pose;
@@ -213,6 +214,7 @@ class WAMV_MPC : public rclcpp::Node
 
     rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr control_inputs_pub;
     rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr disturbance_pub;
+    rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr confidence_pub;
     
     rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr ref_pose_pub;
     rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr error_pose_pub;

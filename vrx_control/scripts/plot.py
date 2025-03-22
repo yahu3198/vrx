@@ -127,13 +127,13 @@ def read_bag_data(bag_dir):
             ekf_twist_psi.append(msg.twist.twist.angular.z)
             ekf_pose_time.append(timestamp_sec)
         
-        elif topic == '/wamv/fault_confidences':
-            msg = deserialize_message(data, Float64MultiArray)
-            if len(msg.data) >= 3:
-                confidence_no_fault.append(msg.data[0])
-                confidence_left_fault.append(msg.data[1])
-                confidence_right_fault.append(msg.data[2])
-                confidence_time.append(timestamp_sec)
+        elif topic == '/wamv/status_confidence':
+            msg = deserialize_message(data, TwistStamped)
+            confidence_no_fault.append(msg.twist.angular.x)
+            # print(confidence_left_fault)
+            confidence_left_fault.append(msg.twist.linear.x)
+            confidence_right_fault.append(msg.twist.linear.y)
+            confidence_time.append(timestamp_sec)
 
     return (error_pose_x, error_pose_y, error_pose_yaw, error_pose_time,
             ref_pose_x, ref_pose_y, ref_pose_yaw, ref_pose_time,
@@ -326,7 +326,7 @@ def plot_data(error_pose_x, error_pose_y, error_pose_yaw, error_pose_time,
 
 def main():
     # Specify your bag folder path
-    bag_dir = 'fdvel15'  # Adjust this to your actual path, e.g., '/path/to/forward0303_0'
+    bag_dir = 'fdvel2_confidence'  # Adjust this to your actual path, e.g., '/path/to/forward0303_0'
 
     # Initialize rclpy for message deserialization
     rclpy.init()

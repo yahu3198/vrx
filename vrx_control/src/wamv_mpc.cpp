@@ -62,6 +62,8 @@ WAMV_MPC::WAMV_MPC()
         "/wamv/ekf_pose", 20);
     disturbance_pub = this->create_publisher<geometry_msgs::msg::TwistStamped>(
         "/wamv/disturbance", 20);
+    confidence_pub = this->create_publisher<geometry_msgs::msg::TwistStamped>(
+        "/wamv/status_confidence", 20);
 
     // initialize
     for(unsigned int i=0; i < WAMV_NU; i++) acados_out.u0[i] = 0.0;
@@ -1341,15 +1343,25 @@ bool WAMV_MPC::detectFault(const VectorXd& features, int& fault_type, std::vecto
             fault_type = last_detected_fault_type;
             
             // Set confidence values
-            if (fault_type == LEFT_THRUST_FAILURE) {
-                fault_confidences[LEFT_THRUST_FAILURE] = 0.7;
-                fault_confidences[RIGHT_THRUST_FAILURE] = 0.2;
-                fault_confidences[NO_FAULT] = 0.1;
-            } else {
-                fault_confidences[RIGHT_THRUST_FAILURE] = 0.7;
-                fault_confidences[LEFT_THRUST_FAILURE] = 0.2;
-                fault_confidences[NO_FAULT] = 0.1;
+            VectorXd scores = VectorXd::Zero(3);
+            for (int i = 0; i < 3; i++) {
+                double logit = fault_model.weights.col(i).dot(features) + fault_model.bias;
+                scores[i] = 1.0 / (1.0 + exp(-logit));
             }
+
+            // Normalize to ensure sum = 1.0
+            double sum = scores.sum();
+            if (sum > 0) {
+                fault_confidences[NO_FAULT] = scores[0] / sum;
+                fault_confidences[LEFT_THRUST_FAILURE] = scores[1] / sum;
+                fault_confidences[RIGHT_THRUST_FAILURE] = scores[2] / sum;
+            }
+
+            confidence_level.header.stamp = rclcpp::Clock().now();
+            confidence_level.twist.linear.x = fault_confidences[LEFT_THRUST_FAILURE];
+            confidence_level.twist.linear.y = fault_confidences[RIGHT_THRUST_FAILURE]; 
+            confidence_level.twist.angular.x = fault_confidences[NO_FAULT];
+            confidence_pub->publish(confidence_level);
             
             RCLCPP_INFO(this->get_logger(), 
                 "FAULT CONFIRMED - Type: %d, Consecutive detections: %d",

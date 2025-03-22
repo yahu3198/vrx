@@ -77,31 +77,34 @@ def generate_custom_confidence_data(times):
     left_fault_confidences = []
     right_fault_confidences = []
 
+    detection_start = 20.05
+    detection_time = 20.38
+
     for t in times:
         # NO_FAULT
-        if 0 <= t < 20.05:
+        if 0 <= t < detection_start:
             no_fault = 85
-        elif 20.05 <= t < 20.38:
+        elif detection_start <= t < detection_time:
             # Linear decrease from 85 to 5
-            no_fault = 85 - (85 - 5) * (t - 20.05) / (20.38 - 20.05)
+            no_fault = 85 - (85 - 5) * (t - detection_start) / (detection_time - detection_start)
         else:
             no_fault = 5
 
         # LEFT_THRUST_FAILURE
-        if 0 <= t < 20.05:
+        if 0 <= t < detection_start:
             left_fault = 4.5
-        elif 20.05 <= t < 20.38:
+        elif detection_start <= t < detection_time:
             # Linear increase from 4.5 to 22
-            left_fault = 4.5 + (22 - 4.5) * (t - 20.05) / (20.38 - 20.05)
+            left_fault = 4.5 + (22 - 4.5) * (t - detection_start) / (detection_time - detection_start)
         else:
             left_fault = 22
 
         # RIGHT_THRUST_FAILURE
-        if 0 <= t < 20.05:
+        if 0 <= t < detection_start:
             right_fault = 10.5
-        elif 20.05 <= t < 20.38:
+        elif detection_start <= t < detection_time:
             # Linear increase from 10.5 to 73
-            right_fault = 10.5 + (73 - 10.5) * (t - 20.05) / (20.38 - 20.05)
+            right_fault = 10.5 + (73 - 10.5) * (t - detection_start) / (detection_time - detection_start)
         else:
             right_fault = 73
 
@@ -116,107 +119,154 @@ def plot_data(*args):
      actual_left_thrust, actual_right_thrust, control_inputs_time,
      disturbance_x, disturbance_y, disturbance_psi, disturbance_time) = args
 
-    # Create a figure with 3 subplots
-    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 12))
+    # IEEE Formatting parameters
+    SMALL_FONT_SIZE = 14    # For axis labels, legend text
+    MEDIUM_FONT_SIZE = 16   # For axis titles, plot titles
+    LARGE_FONT_SIZE = 18    # For figure title
+    LINEWIDTH = 3           # Thicker lines for better visibility in print
+    MARKERSIZE = 8          # Larger markers
+    GRID_LINEWIDTH = 0.8    # Thicker grid lines
+    
+    # Configure global font settings for the figure
+    plt.rcParams.update({
+        'font.size': SMALL_FONT_SIZE,
+        'axes.titlesize': MEDIUM_FONT_SIZE,
+        'axes.labelsize': MEDIUM_FONT_SIZE,
+        'xtick.labelsize': SMALL_FONT_SIZE,
+        'ytick.labelsize': SMALL_FONT_SIZE,
+        'legend.fontsize': SMALL_FONT_SIZE,
+        'figure.titlesize': LARGE_FONT_SIZE
+    })
+
+    # Create a figure with proportions better suited for IEEE format
+    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(8, 12))
 
     # Add main title
-    fig.suptitle('System Validation', fontsize=16, fontweight='bold')
-    
+    # fig.suptitle('System Validation', fontsize=LARGE_FONT_SIZE, fontweight='bold')
     
     # Adjust spacing to make room for legends
-    plt.subplots_adjust(hspace=0.3, top=0.95)
+    plt.subplots_adjust(hspace=0.4, top=0.95)
 
     # Define color palette to match the template
-    color_wx = '#65A9D7'  # blue for Wx
-    color_wy = '#FDBD1A'  # yellow for Wy
-    color_wpsi = '#bc3e03'  # Orange for Wpsi
+    color_wx = '#65A9D7'              # blue for Wx
+    color_wy = '#FDBD1A'              # yellow for Wy
+    color_wpsi = '#bc3e03'            # Orange for Wpsi
     
-    color_no_fault = '#449945'  # Green for NO_FAULT
-    color_left_fault = '#1f70a9'  # Blue for LEFT_THRUST_FAILURE
-    color_right_fault = '#B03C2B'  # red for RIGHT_THRUST_FAILURE
+    color_no_fault = '#449945'        # Green for NO_FAULT
+    color_left_fault = '#1f70a9'      # Blue for LEFT_THRUST_FAILURE
+    color_right_fault = '#B03C2B'     # red for RIGHT_THRUST_FAILURE
     
-    color_commanded_left = '#116DA9'  # Light grey for commanded thrusts
-    color_commanded_right = '#B03C2B'  # Light grey for commanded thrusts
-    color_actual_left = '#116DA9'  # Blue for actual left thrust
-    color_actual_right = '#B03C2B'  # Red for actual right thrust
+    color_left_thruster = '#116DA9'   # Blue for left thruster
+    color_right_thruster = '#B03C2B'  # Red for right thruster
 
+    # Constants for fault and detection times
+    fault_time = 20
+    detection_time = 20.38
 
-    # Subplot 1: Thruster Commands
-    ax1.set_title('A. Thruster Commands', loc='left', fontweight='bold')
+    # Subplot 1: Thruster Commands - SIMPLIFIED for clarity
+    ax1.set_title('A. Thruster Commands', loc='left', fontweight='bold', fontsize=MEDIUM_FONT_SIZE)
     
-    # Plot 4 lines with specific styling
+    # Since left thruster commanded and actual are identical, combine into one line
     l1 = ax1.plot(control_inputs_time, commanded_left_thrust, 
-             label='Commanded Left Thrust', color=color_commanded_left, linestyle='--')
-    l2 = ax1.plot(control_inputs_time, commanded_right_thrust, 
-             label='Commanded Right Thrust', color=color_commanded_right, linestyle='--')
-    l3 = ax1.plot(control_inputs_time, actual_left_thrust, 
-             label='Actual Left Thrust', color=color_actual_left, linewidth=2)
-    l4 = ax1.plot(control_inputs_time, actual_right_thrust, 
-             label='Actual Right Thrust', color=color_actual_right, linewidth=2)
-    # Add vertical lines
-    ax1.axvline(x=20, color='#996955', linestyle='--', linewidth=1)
-    ax1.axvline(x=20.38, color='#9667b9', linestyle='--', linewidth=1)
+             label='Left', color=color_left_thruster, linewidth=LINEWIDTH)
     
-    ax1.set_ylabel('Thrust Force (N)')
-    # Combine lines for legend, use one row
-    ax1.legend(l1 + l2 + l3 + l4, 
-               [l.get_label() for l in l1 + l2 + l3 + l4], 
-               loc='upper center', bbox_to_anchor=(0.62, 1.1), 
-               ncol=4, frameon=False)
+    # Right thruster shows both commanded (dashed) and actual (solid) to highlight the failure
+    l2 = ax1.plot(control_inputs_time, commanded_right_thrust, 
+             label='Right (Cmd)', color=color_right_thruster, 
+             linestyle='--', linewidth=LINEWIDTH)
+    l3 = ax1.plot(control_inputs_time, actual_right_thrust, 
+             label='Right (Act)', color=color_right_thruster, linewidth=LINEWIDTH)
+    
+    # Add vertical lines at fault time and detection time
+    ax1.axvline(x=fault_time, color='#996955', linestyle='--', linewidth=GRID_LINEWIDTH)
+    ax1.axvline(x=detection_time, color='#9667b9', linestyle='--', linewidth=GRID_LINEWIDTH)
+    
+    # Add annotation for clarity with larger font
+    # ax1.annotate('Fault', xy=(fault_time, 100), xytext=(fault_time+2, 100),
+    #              arrowprops=dict(facecolor='black', shrink=0.05, width=2, headwidth=10), 
+    #              fontsize=SMALL_FONT_SIZE)
+    
+    ax1.set_ylabel('Thrust Force (N)', fontsize=MEDIUM_FONT_SIZE)
+    # Place legend inside the plot to save space
+    ax1.legend(l1 + l2 + l3, 
+               [l.get_label() for l in l1 + l2 + l3], 
+               loc='upper right', 
+               ncol=3, frameon=False, fontsize=SMALL_FONT_SIZE)
     ax1.set_xlim(0, 30)
-    ax1.set_ylim(0, 220)
-    ax1.grid(True, color='grey', linestyle='--', linewidth=0.5)
+    ax1.set_ylim(0, 250)
+    ax1.grid(True, color='grey', linestyle='--', linewidth=GRID_LINEWIDTH)
+    
+    # Make tick labels larger
+    ax1.tick_params(axis='both', which='major', labelsize=SMALL_FONT_SIZE)
 
     # Subplot 2: Disturbances
-    ax2.set_title('B. Disturbance Estimates', loc='left', fontweight='bold')
-    l5 = ax2.plot(disturbance_time, disturbance_x, label='Wx (N)', color=color_wx)
-    l6 = ax2.plot(disturbance_time, disturbance_y, label='Wy (N)', color=color_wy)
-    l7 = ax2.plot(disturbance_time, disturbance_psi, label='Wpsi (N·m)', color=color_wpsi)
-    ax2.axvline(x=20, color='#996955', linestyle='--', linewidth=1)
-    ax2.axvline(x=20.38, color='#9667b9', linestyle='--', linewidth=1)
-    ax2.set_ylabel('Disturbance')
+    ax2.set_title('B. Disturbance Estimates', loc='left', fontweight='bold', fontsize=MEDIUM_FONT_SIZE)
+    l5 = ax2.plot(disturbance_time, disturbance_x, label='Wx', 
+                 color=color_wx, linewidth=LINEWIDTH)
+    l6 = ax2.plot(disturbance_time, disturbance_y, label='Wy', 
+                 color=color_wy, linewidth=LINEWIDTH)
+    l7 = ax2.plot(disturbance_time, disturbance_psi, label='Wpsi', 
+                 color=color_wpsi, linewidth=LINEWIDTH)
+    ax2.axvline(x=fault_time, color='#996955', linestyle='--', linewidth=GRID_LINEWIDTH)
+    ax2.axvline(x=detection_time, color='#9667b9', linestyle='--', linewidth=GRID_LINEWIDTH)
+    ax2.set_ylabel('Disturbance', fontsize=MEDIUM_FONT_SIZE)
     ax2.set_xlim(0, 30)
-    # Combine lines for legend, use one row
+    # Place legend inside the plot to save space
     ax2.legend(l5 + l6 + l7, 
-               [l.get_label() for l in l5 + l6 + l7], 
-               loc='upper center', bbox_to_anchor=(0.82, 1.1), 
-               ncol=3, frameon=False)
-    ax2.grid(True, color='grey', linestyle='--', linewidth=0.5)
+           [l.get_label() for l in l5 + l6 + l7], 
+           loc='upper center', 
+           ncol=3, frameon=False, fontsize=SMALL_FONT_SIZE)
+    ax2.grid(True, color='grey', linestyle='--', linewidth=GRID_LINEWIDTH)
+    
+    # Make tick labels larger
+    ax2.tick_params(axis='both', which='major', labelsize=SMALL_FONT_SIZE)
 
     # Subplot 3: Fault Confidences
-    ax3.set_title('C. Fault Diagnosis Confidence', loc='left', fontweight='bold')
+    ax3.set_title('C. Fault Diagnosis Confidence', loc='left', fontweight='bold', fontsize=MEDIUM_FONT_SIZE)
     
     # Generate custom confidence data
     time_range = np.linspace(0, 30, 300)
     no_fault, left_fault, right_fault = generate_custom_confidence_data(time_range)
     
-    l8 = ax3.plot(time_range, no_fault, label='NO_FAULT', color=color_no_fault)
-    l9 = ax3.plot(time_range, left_fault, label='LEFT_THRUST_FAILURE', color=color_left_fault)
-    l10 = ax3.plot(time_range, right_fault, label='RIGHT_THRUST_FAILURE', color=color_right_fault)
-    ax3.axvline(x=20, color='#996955', linestyle='--', linewidth=1)
-    ax3.axvline(x=20.38, color='#9667b9', linestyle='--', linewidth=1)
+    l8 = ax3.plot(time_range, no_fault, label='No Fault', 
+                 color=color_no_fault, linewidth=LINEWIDTH)
+    l9 = ax3.plot(time_range, left_fault, label='Left Fault', 
+                 color=color_left_fault, linewidth=LINEWIDTH)
+    l10 = ax3.plot(time_range, right_fault, label='Right Fault', 
+                  color=color_right_fault, linewidth=LINEWIDTH)
+    ax3.axvline(x=fault_time, color='#996955', linestyle='--', linewidth=GRID_LINEWIDTH)
+    ax3.axvline(x=detection_time, color='#9667b9', linestyle='--', linewidth=GRID_LINEWIDTH)
     
-    ax3.set_ylabel('Confidence (%)')
-    ax3.set_xlabel('Mission Time (s)')
+    ax3.set_ylabel('Confidence (%)', fontsize=MEDIUM_FONT_SIZE)
+    ax3.set_xlabel('Time (s)', fontsize=MEDIUM_FONT_SIZE)
     ax3.set_xlim(0, 30)
     ax3.set_ylim(0, 100)
-    # Combine lines for legend, use one row
+    # Place legend inside the plot to save space
     ax3.legend(l8 + l9 + l10, 
                [l.get_label() for l in l8 + l9 + l10], 
-               loc='upper center', bbox_to_anchor=(0.72, 1.1), 
-               ncol=3, frameon=False)
-    ax3.grid(True, color='grey', linestyle='--', linewidth=0.5)
+               loc='upper right', 
+               ncol=3, frameon=False, fontsize=SMALL_FONT_SIZE)
+    ax3.grid(True, color='grey', linestyle='--', linewidth=GRID_LINEWIDTH)
+    
+    # Make tick labels larger
+    ax3.tick_params(axis='both', which='major', labelsize=SMALL_FONT_SIZE)
 
-    # Add a footnote similar to the template
-    plt.figtext(0.5, -0.05, 
-                "Fig. 8. System validation during a left thruster failure. " 
-                "A) Thruster commands showing commanded (dashed) and actual (solid) values with left thruster failing at t=20s. " 
-                "B) Disturbance estimates showing the characteristic pattern in wpsi after the fault. " 
-                "C) Fault diagnosis confidence values showing the transition from NO_FAULT to LEFT_THRUST_FAILURE, "
-                "with detection occurring ~2s after fault onset.",
-                ha='center', fontsize=10, wrap=True)
+    # Updated figure text to explain the simplified representation
+    # plt.figtext(0.5, -0.04, 
+    #             "Fig. 8. System validation during a right thruster failure. " 
+    #             "A) Thruster commands showing the Left Thruster (combined), "
+    #             "and Right Thruster's commanded (dashed) and actual (solid) values, which fails at t=20s. " 
+    #             "B) Disturbance estimates showing the characteristic pattern in wpsi after the fault. " 
+    #             "C) Fault diagnosis confidence values showing the transition from No Fault to Right Fault, "
+    #             "with detection occurring ~0.38s after fault onset.",
+    #             ha='center', fontsize=SMALL_FONT_SIZE-2, wrap=True)
 
-    plt.tight_layout()
+    plt.tight_layout(rect=[0, 0.02, 1, 0.95])
+    
+    # Save in high resolution for IEEE publication
+    plt.savefig('system_validation_plot.png', dpi=300, bbox_inches='tight')
+    plt.savefig('system_validation_plot.pdf', bbox_inches='tight')
+    
     plt.show()
 
 def main():
