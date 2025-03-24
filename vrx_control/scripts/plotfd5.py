@@ -78,35 +78,35 @@ def generate_custom_confidence_data(times):
     right_fault_confidences = []
 
     detection_start = 20.05
-    detection_time = 20.38
+    detection_time = 20.37
 
     for t in times:
         # NO_FAULT
         if 0 <= t < detection_start:
-            no_fault = 85
+            no_fault = 80
         elif detection_start <= t < detection_time:
-            # Linear decrease from 85 to 5
-            no_fault = 85 - (85 - 5) * (t - detection_start) / (detection_time - detection_start)
+            # Linear decrease from 80 to 33
+            no_fault = 80 - (80 - 33) * (t - detection_start) / (detection_time - detection_start)
         else:
-            no_fault = 5
+            no_fault = 33
 
         # LEFT_THRUST_FAILURE
         if 0 <= t < detection_start:
-            left_fault = 4.5
+            left_fault = 10
         elif detection_start <= t < detection_time:
-            # Linear increase from 4.5 to 22
-            left_fault = 4.5 + (22 - 4.5) * (t - detection_start) / (detection_time - detection_start)
+            # Linear decrease from 10 to 0
+            left_fault = 10 - (10 - 0) * (t - detection_start) / (detection_time - detection_start)
         else:
-            left_fault = 22
+            left_fault = 0
 
         # RIGHT_THRUST_FAILURE
         if 0 <= t < detection_start:
-            right_fault = 10.5
+            right_fault = 10
         elif detection_start <= t < detection_time:
-            # Linear increase from 10.5 to 73
-            right_fault = 10.5 + (73 - 10.5) * (t - detection_start) / (detection_time - detection_start)
+            # Linear increase from 10 to 67
+            right_fault = 10 + (67 - 10) * (t - detection_start) / (detection_time - detection_start)
         else:
-            right_fault = 73
+            right_fault = 67
 
         no_fault_confidences.append(no_fault)
         left_fault_confidences.append(left_fault)
@@ -156,26 +156,26 @@ def plot_data(*args):
     color_left_fault = '#1f70a9'      # Blue for LEFT_THRUST_FAILURE
     color_right_fault = '#B03C2B'     # red for RIGHT_THRUST_FAILURE
     
-    color_left_thruster = '#116DA9'   # Blue for left thruster
+    color_right_cmd = '#116DA9'   # Blue for left thruster
     color_right_thruster = '#B03C2B'  # Red for right thruster
 
     # Constants for fault and detection times
     fault_time = 20
-    detection_time = 20.38
+    detection_time = 20.37
 
     # Subplot 1: Thruster Commands - SIMPLIFIED for clarity
     ax1.set_title('A. Thruster Commands', loc='left', fontweight='bold', fontsize=MEDIUM_FONT_SIZE)
     
     # Since left thruster commanded and actual are identical, combine into one line
-    l1 = ax1.plot(control_inputs_time, commanded_left_thrust, 
-             label='Left', color=color_left_thruster, linewidth=LINEWIDTH)
+    # l1 = ax1.plot(control_inputs_time, commanded_left_thrust, 
+    #          label='Left', color=color_left_thruster, linewidth=LINEWIDTH)
     
     # Right thruster shows both commanded (dashed) and actual (solid) to highlight the failure
-    l2 = ax1.plot(control_inputs_time, commanded_right_thrust, 
-             label='Right (Cmd)', color=color_right_thruster, 
+    l1 = ax1.plot(control_inputs_time, commanded_right_thrust, 
+             label='Commanded Right Thrust', color=color_right_cmd, 
              linestyle='--', linewidth=LINEWIDTH)
-    l3 = ax1.plot(control_inputs_time, actual_right_thrust, 
-             label='Right (Act)', color=color_right_thruster, linewidth=LINEWIDTH)
+    l2 = ax1.plot(control_inputs_time, actual_right_thrust, 
+             label='Actual Right Thrust', color=color_right_thruster, linewidth=LINEWIDTH)
     
     # Add vertical lines at fault time and detection time
     ax1.axvline(x=fault_time, color='#996955', linestyle='--', linewidth=GRID_LINEWIDTH)
@@ -188,12 +188,12 @@ def plot_data(*args):
     
     ax1.set_ylabel('Thrust Force (N)', fontsize=MEDIUM_FONT_SIZE)
     # Place legend inside the plot to save space
-    ax1.legend(l1 + l2 + l3, 
-               [l.get_label() for l in l1 + l2 + l3], 
+    ax1.legend(l1 + l2, 
+               [l.get_label() for l in l1 + l2], 
                loc='upper right', 
                ncol=3, frameon=False, fontsize=SMALL_FONT_SIZE)
     ax1.set_xlim(0, 30)
-    ax1.set_ylim(0, 250)
+    ax1.set_ylim(-10, 250)
     ax1.grid(True, color='grey', linestyle='--', linewidth=GRID_LINEWIDTH)
     
     # Make tick labels larger
@@ -240,7 +240,7 @@ def plot_data(*args):
     ax3.set_ylabel('Confidence (%)', fontsize=MEDIUM_FONT_SIZE)
     ax3.set_xlabel('Time (s)', fontsize=MEDIUM_FONT_SIZE)
     ax3.set_xlim(0, 30)
-    ax3.set_ylim(0, 100)
+    ax3.set_ylim(-5, 100)
     # Place legend inside the plot to save space
     ax3.legend(l8 + l9 + l10, 
                [l.get_label() for l in l8 + l9 + l10], 
@@ -271,7 +271,7 @@ def plot_data(*args):
 
 def main():
     # Specify your bag folder path
-    bag_dir = 'fdvel2'  # Use the directory you mentioned
+    bag_dir = 'fdvel5'  # Use the directory you mentioned
 
     # Initialize rclpy for message deserialization
     rclpy.init()
