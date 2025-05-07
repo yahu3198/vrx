@@ -220,14 +220,13 @@ def plot_combined_data(data_5ms, data_15ms):
     detection_time_15ms = 20.85
     
     # Title positions as in original (above each subplot)
-    ax1_5ms.set_title('A. Thruster Commands (5 m/s)', loc='left', fontweight='bold', fontsize=MEDIUM_FONT_SIZE)
-    ax1_15ms.set_title('A. Thruster Commands (15 m/s)', loc='left', fontweight='bold', fontsize=MEDIUM_FONT_SIZE)
+    ax1_5ms.set_title('A1. Thruster Commands (5 m/s)', loc='left', fontweight='bold', fontsize=MEDIUM_FONT_SIZE)
+    ax1_15ms.set_title('A2. Thruster Commands (15 m/s)', loc='left', fontweight='bold', fontsize=MEDIUM_FONT_SIZE)
 
     # ROW 1: Thruster Commands - 5m/s plot
     ax1_5ms.set_ylabel('Thrust Force (N)', fontsize=MEDIUM_FONT_SIZE)
     l1_5ms = ax1_5ms.plot(control_inputs_time_5ms, commanded_right_thrust_5ms, 
-                     label='Commanded Right Thrust', color=color_right_cmd, 
-                     linestyle='--', linewidth=LINEWIDTH)
+                     label='Commanded Right Thrust', color=color_right_cmd, linewidth=LINEWIDTH)
     l2_5ms = ax1_5ms.plot(control_inputs_time_5ms, actual_right_thrust_5ms, 
                      label='Actual Right Thrust', color=color_right_thruster, linewidth=LINEWIDTH)
     ax1_5ms.axvline(x=fault_time, color='#996955', linestyle='--', linewidth=1.5, dashes=(4, 2))
@@ -242,8 +241,7 @@ def plot_combined_data(data_5ms, data_15ms):
     
     # 15m/s plot
     l1_15ms = ax1_15ms.plot(control_inputs_time_15ms, commanded_right_thrust_15ms, 
-                      label='Commanded Right Thrust', color=color_right_cmd, 
-                      linestyle='--', linewidth=LINEWIDTH)
+                      label='Commanded Right Thrust', color=color_right_cmd, linewidth=LINEWIDTH)
     l2_15ms = ax1_15ms.plot(control_inputs_time_15ms, actual_right_thrust_15ms, 
                       label='Actual Right Thrust', color=color_right_thruster, linewidth=LINEWIDTH)
     ax1_15ms.axvline(x=fault_time, color='#996955', linestyle='--', linewidth=1.5, dashes=(4, 2))
@@ -256,16 +254,16 @@ def plot_combined_data(data_5ms, data_15ms):
                    ncol=2, frameon=False, fontsize=SMALL_FONT_SIZE)
 
     # ROW 2: Disturbances - Titles
-    ax2_5ms.set_title('B. Disturbance Estimates (5 m/s)', loc='left', fontweight='bold', fontsize=MEDIUM_FONT_SIZE)
-    ax2_15ms.set_title('B. Disturbance Estimates (15 m/s)', loc='left', fontweight='bold', fontsize=MEDIUM_FONT_SIZE)
+    ax2_5ms.set_title('B1. Disturbance Estimates (5 m/s)', loc='left', fontweight='bold', fontsize=MEDIUM_FONT_SIZE)
+    ax2_15ms.set_title('B2. Disturbance Estimates (15 m/s)', loc='left', fontweight='bold', fontsize=MEDIUM_FONT_SIZE)
     
     # 5m/s plot
     ax2_5ms.set_ylabel('Disturbance', fontsize=MEDIUM_FONT_SIZE)
-    l5_5ms = ax2_5ms.plot(disturbance_time_5ms, disturbance_x_5ms, label='Wx (N)', 
+    l5_5ms = ax2_5ms.plot(disturbance_time_5ms, disturbance_x_5ms, label='$w_x$ (N)', 
                      color=color_wx, linewidth=LINEWIDTH)
-    l6_5ms = ax2_5ms.plot(disturbance_time_5ms, disturbance_y_5ms, label='Wy (N)', 
+    l6_5ms = ax2_5ms.plot(disturbance_time_5ms, disturbance_y_5ms, label='$w_y$ (N)', 
                      color=color_wy, linewidth=LINEWIDTH)
-    l7_5ms = ax2_5ms.plot(disturbance_time_5ms, disturbance_psi_5ms, label='Wpsi (Nm)', 
+    l7_5ms = ax2_5ms.plot(disturbance_time_5ms, disturbance_psi_5ms, label='$w_\\psi$ (Nm)', 
                      color=color_wpsi, linewidth=LINEWIDTH)
     ax2_5ms.axvline(x=fault_time, color='#996955', linestyle='--', linewidth=1.5, dashes=(4, 2))
     ax2_5ms.axvline(x=detection_time_5ms, color='#9667b9', linestyle='--', linewidth=1.5, dashes=(4, 2))
@@ -277,11 +275,11 @@ def plot_combined_data(data_5ms, data_15ms):
                   ncol=3, frameon=False, fontsize=SMALL_FONT_SIZE)
     
     # 15m/s plot
-    l5_15ms = ax2_15ms.plot(disturbance_time_15ms, disturbance_x_15ms, label='Wx (N)', 
+    l5_15ms = ax2_15ms.plot(disturbance_time_15ms, disturbance_x_15ms, label='$w_x$ (N)', 
                       color=color_wx, linewidth=LINEWIDTH)
-    l6_15ms = ax2_15ms.plot(disturbance_time_15ms, disturbance_y_15ms, label='Wy (N)', 
+    l6_15ms = ax2_15ms.plot(disturbance_time_15ms, disturbance_y_15ms, label='$w_y$ (N)', 
                       color=color_wy, linewidth=LINEWIDTH)
-    l7_15ms = ax2_15ms.plot(disturbance_time_15ms, disturbance_psi_15ms, label='Wpsi (Nm)', 
+    l7_15ms = ax2_15ms.plot(disturbance_time_15ms, disturbance_psi_15ms, label='$w_\\psi$ (Nm)', 
                       color=color_wpsi, linewidth=LINEWIDTH)
     ax2_15ms.axvline(x=fault_time, color='#996955', linestyle='--', linewidth=1.5, dashes=(4, 2))
     ax2_15ms.axvline(x=detection_time_15ms, color='#9667b9', linestyle='--', linewidth=1.5, dashes=(4, 2))
@@ -293,8 +291,8 @@ def plot_combined_data(data_5ms, data_15ms):
                    ncol=3, frameon=False, fontsize=SMALL_FONT_SIZE)
 
     # ROW 3: Fault Confidences - Titles
-    ax3_5ms.set_title('C. Fault Diagnosis Confidence (5 m/s)', loc='left', fontweight='bold', fontsize=MEDIUM_FONT_SIZE)
-    ax3_15ms.set_title('C. Fault Diagnosis Confidence (15 m/s)', loc='left', fontweight='bold', fontsize=MEDIUM_FONT_SIZE)
+    ax3_5ms.set_title('C1. Fault Diagnosis Confidence (5 m/s)', loc='left', fontweight='bold', fontsize=MEDIUM_FONT_SIZE)
+    ax3_15ms.set_title('C2. Fault Diagnosis Confidence (15 m/s)', loc='left', fontweight='bold', fontsize=MEDIUM_FONT_SIZE)
     
     # Generate custom confidence data
     time_range = np.linspace(0, 30, 300)
