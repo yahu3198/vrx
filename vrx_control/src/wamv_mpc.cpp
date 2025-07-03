@@ -1315,11 +1315,12 @@ bool WAMV_MPC::detectFault(const VectorXd& features, int& fault_type, std::vecto
     static int consecutive_normal_detections = 0;
     static int last_detected_fault_type = NO_FAULT;
     static bool fault_state_active = false;
-    
+    static bool use_ml_confidences = false;  // NEW: Separate flag for confidence mode
+
     // Fault confirmation parameters
     const int FAULT_CONFIRMATION_COUNT = 1;  // Only need 1 detection to confirm
     const int NORMAL_CONFIRMATION_COUNT = 5; // Need 5 consecutive normals to clear
-    
+
     // Update state counters
     if (raw_fault_detected) {
         if (raw_fault_type == last_detected_fault_type) {
@@ -1329,11 +1330,90 @@ bool WAMV_MPC::detectFault(const VectorXd& features, int& fault_type, std::vecto
             last_detected_fault_type = raw_fault_type;
         }
         consecutive_normal_detections = 0;
+        use_ml_confidences = true;  // Switch to ML mode when fault detected
     } else {
-        consecutive_normal_detections++;
+        // Only increment normal detections if we're not currently in a fault state
+        // OR if the disturbance values have actually returned to normal levels
+        bool truly_normal = (std::abs(esti_x[6]) < wx_threshold/2) && 
+                        (std::abs(esti_x[7]) < wy_threshold/2) && 
+                        (std::abs(esti_x[8]) < wpsi_threshold/2);
+        
+        if (!fault_state_active || truly_normal) {
+            consecutive_normal_detections++;
+        } else {
+            // Reset normal counter if disturbances are still high during fault state
+            consecutive_normal_detections = 0;
+        }
+        
         if (consecutive_normal_detections > 100) consecutive_normal_detections = 100; // Prevent overflow
+        
+        // IMPORTANT: Don't reset use_ml_confidences here!
+        // Only reset it when fault is completely cleared (in the state machine below)
     }
-    
+
+    // ALWAYS calculate ML confidence values (regardless of fault state)
+    VectorXd scores = VectorXd::Zero(3);
+    for (int i = 0; i < 3; i++) {
+        double logit = fault_model.weights.col(i).dot(features) + fault_model.bias;
+        scores[i] = 1.0 / (1.0 + exp(-logit));
+    }
+
+    // Normalize to ensure sum = 1.0
+    double sum = scores.sum();
+    if (sum > 0) {
+        fault_confidences[NO_FAULT] = scores[0] / sum;
+        fault_confidences[LEFT_THRUST_FAILURE] = scores[1] / sum;
+        fault_confidences[RIGHT_THRUST_FAILURE] = scores[2] / sum;
+    } else {
+        // Fallback values if ML model fails
+        fault_confidences[NO_FAULT] = 0.8;
+        fault_confidences[LEFT_THRUST_FAILURE] = 0.1;
+        fault_confidences[RIGHT_THRUST_FAILURE] = 0.1;
+    }
+
+    // Decide which confidences to use based on our separate flag
+    RCLCPP_INFO(this->get_logger(), 
+        "BEFORE confidence decision: use_ml_confidences=%s, fault_state_active=%s, raw_fault_detected=%s", 
+        use_ml_confidences ? "true" : "false", 
+        fault_state_active ? "true" : "false",
+        raw_fault_detected ? "true" : "false");
+
+    if (!use_ml_confidences) {
+        // Normal operation - use default values
+        fault_confidences[NO_FAULT] = 0.8;           // 80%
+        fault_confidences[LEFT_THRUST_FAILURE] = 0.1; // 10%
+        fault_confidences[RIGHT_THRUST_FAILURE] = 0.1; // 10%
+        
+        RCLCPP_INFO(this->get_logger(), "SETTING DEFAULT confidences: 80/10/10");
+    } else {
+        // Use ML confidences, but ensure reasonable fault-specific values
+        RCLCPP_INFO(this->get_logger(), 
+            "KEEPING ML confidences: NO_FAULT=%.1f, LEFT=%.1f, RIGHT=%.1f", 
+            fault_confidences[NO_FAULT]*100, fault_confidences[LEFT_THRUST_FAILURE]*100, 
+            fault_confidences[RIGHT_THRUST_FAILURE]*100);
+            
+        if (fault_state_active && last_detected_fault_type == LEFT_THRUST_FAILURE) {
+            if (fault_confidences[LEFT_THRUST_FAILURE] < 0.5) {
+                fault_confidences[LEFT_THRUST_FAILURE] = 0.7;
+                fault_confidences[RIGHT_THRUST_FAILURE] = 0.15;
+                fault_confidences[NO_FAULT] = 0.15;
+                RCLCPP_INFO(this->get_logger(), "BOOSTED LEFT fault confidence to 70/15/15");
+            }
+        } else if (fault_state_active && last_detected_fault_type == RIGHT_THRUST_FAILURE) {
+            if (fault_confidences[RIGHT_THRUST_FAILURE] < 0.5) {
+                fault_confidences[RIGHT_THRUST_FAILURE] = 0.7;
+                fault_confidences[LEFT_THRUST_FAILURE] = 0.15;
+                fault_confidences[NO_FAULT] = 0.15;
+                RCLCPP_INFO(this->get_logger(), "BOOSTED RIGHT fault confidence to 15/70/15");
+            }
+        }
+    }
+
+    RCLCPP_INFO(this->get_logger(), 
+        "FINAL confidences before state machine: NO_FAULT=%.1f, LEFT=%.1f, RIGHT=%.1f", 
+        fault_confidences[NO_FAULT]*100, fault_confidences[LEFT_THRUST_FAILURE]*100, 
+        fault_confidences[RIGHT_THRUST_FAILURE]*100);
+
     // State machine for fault status
     if (!fault_state_active) {
         // Currently in normal state
@@ -1342,21 +1422,8 @@ bool WAMV_MPC::detectFault(const VectorXd& features, int& fault_type, std::vecto
             fault_state_active = true;
             fault_type = last_detected_fault_type;
             
-            // Set confidence values
-            VectorXd scores = VectorXd::Zero(3);
-            for (int i = 0; i < 3; i++) {
-                double logit = fault_model.weights.col(i).dot(features) + fault_model.bias;
-                scores[i] = 1.0 / (1.0 + exp(-logit));
-            }
-
-            // Normalize to ensure sum = 1.0
-            double sum = scores.sum();
-            if (sum > 0) {
-                fault_confidences[NO_FAULT] = scores[0] / sum;
-                fault_confidences[LEFT_THRUST_FAILURE] = scores[1] / sum;
-                fault_confidences[RIGHT_THRUST_FAILURE] = scores[2] / sum;
-            }
-
+            // Use ML confidences for fault state
+            
             confidence_level.header.stamp = rclcpp::Clock().now();
             confidence_level.twist.linear.x = fault_confidences[LEFT_THRUST_FAILURE];
             confidence_level.twist.linear.y = fault_confidences[RIGHT_THRUST_FAILURE]; 
@@ -1369,8 +1436,17 @@ bool WAMV_MPC::detectFault(const VectorXd& features, int& fault_type, std::vecto
                 
             return true;
         } else {
-            // Stay in normal state
+            // Stay in normal state - but still publish confidence values
             fault_type = NO_FAULT;
+            
+            // Publish confidence values for normal operation
+            auto conf_msg = std::make_unique<std_msgs::msg::Float64MultiArray>();
+            conf_msg->data.resize(3);
+            conf_msg->data[0] = fault_confidences[NO_FAULT];
+            conf_msg->data[1] = fault_confidences[LEFT_THRUST_FAILURE];
+            conf_msg->data[2] = fault_confidences[RIGHT_THRUST_FAILURE];
+            fault_confidence_pub->publish(*conf_msg);
+            
             return false;
         }
     } else {
@@ -1379,6 +1455,17 @@ bool WAMV_MPC::detectFault(const VectorXd& features, int& fault_type, std::vecto
             // Clear fault after multiple normal readings
             fault_state_active = false;
             fault_type = NO_FAULT;
+            use_ml_confidences = false;  // Switch back to default values
+            
+            // Don't set confidence values here - they'll be set above based on use_ml_confidences flag
+            
+            // Publish the cleared fault confidence
+            auto conf_msg = std::make_unique<std_msgs::msg::Float64MultiArray>();
+            conf_msg->data.resize(3);
+            conf_msg->data[0] = fault_confidences[NO_FAULT];
+            conf_msg->data[1] = fault_confidences[LEFT_THRUST_FAILURE];
+            conf_msg->data[2] = fault_confidences[RIGHT_THRUST_FAILURE];
+            fault_confidence_pub->publish(*conf_msg);
             
             RCLCPP_INFO(this->get_logger(), 
                 "FAULT CLEARED - After %d consecutive normal readings",
@@ -1389,16 +1476,16 @@ bool WAMV_MPC::detectFault(const VectorXd& features, int& fault_type, std::vecto
             // Continue reporting current fault
             fault_type = last_detected_fault_type;
             
-            // Set confidence values
-            if (fault_type == LEFT_THRUST_FAILURE) {
-                fault_confidences[LEFT_THRUST_FAILURE] = 0.7;
-                fault_confidences[RIGHT_THRUST_FAILURE] = 0.2;
-                fault_confidences[NO_FAULT] = 0.1;
-            } else {
-                fault_confidences[RIGHT_THRUST_FAILURE] = 0.7;
-                fault_confidences[LEFT_THRUST_FAILURE] = 0.2;
-                fault_confidences[NO_FAULT] = 0.1;
-            }
+            // Keep the ML-calculated confidences (don't override them)
+            // The confidences were already calculated above using the ML model
+            
+            // Publish fault confidence
+            auto conf_msg = std::make_unique<std_msgs::msg::Float64MultiArray>();
+            conf_msg->data.resize(3);
+            conf_msg->data[0] = fault_confidences[NO_FAULT];
+            conf_msg->data[1] = fault_confidences[LEFT_THRUST_FAILURE];
+            conf_msg->data[2] = fault_confidences[RIGHT_THRUST_FAILURE];
+            fault_confidence_pub->publish(*conf_msg);
             
             return true;
         }

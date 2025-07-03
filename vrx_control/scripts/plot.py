@@ -326,7 +326,7 @@ def plot_data(error_pose_x, error_pose_y, error_pose_yaw, error_pose_time,
 
 def main():
     # Specify your bag folder path
-    bag_dir = 'fdvel2_confidence'  # Adjust this to your actual path, e.g., '/path/to/forward0303_0'
+    bag_dir = 'turn0513_0'  # Adjust this to your actual path, e.g., '/path/to/forward0303_0'
 
     # Initialize rclpy for message deserialization
     rclpy.init()
