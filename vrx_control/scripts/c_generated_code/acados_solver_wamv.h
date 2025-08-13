@@ -37,13 +37,13 @@
 #include "acados_c/external_function_interface.h"
 
 #define WAMV_NX     6
-#define WAMV_NZ     4
-#define WAMV_NU     4
-#define WAMV_NP     4
+#define WAMV_NZ     0
+#define WAMV_NU     2
+#define WAMV_NP     2
 #define WAMV_NP_GLOBAL     0
 #define WAMV_NBX    0
 #define WAMV_NBX0   6
-#define WAMV_NBU    4
+#define WAMV_NBU    2
 #define WAMV_NSBX   0
 #define WAMV_NSBU   0
 #define WAMV_NSH    0
@@ -61,8 +61,8 @@
 #define WAMV_NG     0
 #define WAMV_NBXN   0
 #define WAMV_NGN    0
-#define WAMV_NY0    14
-#define WAMV_NY     14
+#define WAMV_NY0    8
+#define WAMV_NY     8
 #define WAMV_NYN    6
 #define WAMV_N      60
 #define WAMV_NH     0
@@ -98,9 +98,9 @@ typedef struct wamv_solver_capsule
 
     // dynamics
 
-    external_function_external_param_casadi *impl_dae_fun;
-    external_function_external_param_casadi *impl_dae_fun_jac_x_xdot_z;
-    external_function_external_param_casadi *impl_dae_jac_x_xdot_u_z;
+    external_function_external_param_casadi *expl_vde_forw;
+    external_function_external_param_casadi *expl_ode_fun;
+    external_function_external_param_casadi *expl_vde_adj;
 
 
 

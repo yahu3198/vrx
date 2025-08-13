@@ -645,11 +645,9 @@ void WAMV_MPC::EKF()
     pre_ekf_pos.r = esti_x[5];
     // get input u and measuremnet y
     meas_u << solver_param.Tp_pre, solver_param.Ts_pre, solver_param.delta_p_pre, solver_param.delta_s_pre;
-    // tau << meas_u[0] * cos(meas_u[2]) + meas_u[1] * cos(meas_u[3]),
-    //         meas_u[0] * sin(meas_u[2]) + meas_u[1] * sin(meas_u[3]),
-    //         -LCG * meas_u[0] * meas_u[2] - B/2 * meas_u[0] * sin(meas_u[2]) - LCG * meas_u[1] * cos(meas_u[3]) + B/2 * meas_u[1] * sin(meas_u[3]);
+    
     // if two fixed direction thrusters
-    tau << meas_u[0] + meas_u[1], 0, -LCG*meas_u[0]+LCG*meas_u[1];
+    tau << meas_u[0] + meas_u[1], 0, -B/2*meas_u[0]+B/2*meas_u[1];
     
             // meas_y << local_pos.x, local_pos.y, local_pos.psi,
     //         local_pos.u, local_pos.v, local_pos.r,

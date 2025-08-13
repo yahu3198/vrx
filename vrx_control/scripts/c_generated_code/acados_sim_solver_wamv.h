@@ -35,9 +35,9 @@
 #include "acados_c/external_function_interface.h"
 
 #define WAMV_NX     6
-#define WAMV_NZ     4
-#define WAMV_NU     4
-#define WAMV_NP     4
+#define WAMV_NZ     0
+#define WAMV_NU     2
+#define WAMV_NP     2
 
 #ifdef __cplusplus
 extern "C" {

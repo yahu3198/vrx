@@ -162,7 +162,7 @@ void wamv_acados_create_set_plan(ocp_nlp_plan_t* nlp_solver_plan, const int N)
     for (int i = 0; i < N; i++)
     {
         nlp_solver_plan->nlp_dynamics[i] = CONTINUOUS_MODEL;
-        nlp_solver_plan->sim_solver_plan[i].sim_solver = IRK;
+        nlp_solver_plan->sim_solver_plan[i].sim_solver = ERK;
     }
 
     nlp_solver_plan->nlp_constraints[0] = BGH;
@@ -343,21 +343,22 @@ void wamv_acados_create_setup_functions(wamv_solver_capsule* capsule)
 
 
 
-    // implicit dae
-    capsule->impl_dae_fun = (external_function_external_param_casadi *) malloc(sizeof(external_function_external_param_casadi)*N);
+    // explicit ode
+    capsule->expl_vde_forw = (external_function_external_param_casadi *) malloc(sizeof(external_function_external_param_casadi)*N);
     for (int i = 0; i < N; i++) {
-        MAP_CASADI_FNC(impl_dae_fun[i], wamv_impl_dae_fun);
+        MAP_CASADI_FNC(expl_vde_forw[i], wamv_expl_vde_forw);
     }
 
-    capsule->impl_dae_fun_jac_x_xdot_z = (external_function_external_param_casadi *) malloc(sizeof(external_function_external_param_casadi)*N);
+    capsule->expl_ode_fun = (external_function_external_param_casadi *) malloc(sizeof(external_function_external_param_casadi)*N);
     for (int i = 0; i < N; i++) {
-        MAP_CASADI_FNC(impl_dae_fun_jac_x_xdot_z[i], wamv_impl_dae_fun_jac_x_xdot_z);
+        MAP_CASADI_FNC(expl_ode_fun[i], wamv_expl_ode_fun);
     }
 
-    capsule->impl_dae_jac_x_xdot_u_z = (external_function_external_param_casadi *) malloc(sizeof(external_function_external_param_casadi)*N);
+    capsule->expl_vde_adj = (external_function_external_param_casadi *) malloc(sizeof(external_function_external_param_casadi)*N);
     for (int i = 0; i < N; i++) {
-        MAP_CASADI_FNC(impl_dae_jac_x_xdot_u_z[i], wamv_impl_dae_jac_x_xdot_u_z);
+        MAP_CASADI_FNC(expl_vde_adj[i], wamv_expl_vde_adj);
     }
+
 
     // nonlinear least squares cost
     capsule->cost_y_fun = (external_function_external_param_casadi *) malloc(sizeof(external_function_external_param_casadi)*(N-1));
@@ -506,11 +507,9 @@ void wamv_acados_setup_nlp_in(wamv_solver_capsule* capsule, const int N, double*
     /**** Dynamics ****/
     for (int i = 0; i < N; i++)
     {
-        ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "impl_dae_fun", &capsule->impl_dae_fun[i]);
-        ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i,
-                                   "impl_dae_fun_jac_x_xdot_z", &capsule->impl_dae_fun_jac_x_xdot_z[i]);
-        ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i,
-                                   "impl_dae_jac_x_xdot_u", &capsule->impl_dae_jac_x_xdot_u_z[i]);
+        ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "expl_vde_forw", &capsule->expl_vde_forw[i]);
+        ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "expl_ode_fun", &capsule->expl_ode_fun[i]);
+        ocp_nlp_dynamics_model_set_external_param_fun(nlp_config, nlp_dims, nlp_in, i, "expl_vde_adj", &capsule->expl_vde_adj[i]);
     }
 
     /**** Cost ****/
@@ -529,12 +528,6 @@ void wamv_acados_setup_nlp_in(wamv_solver_capsule* capsule, const int N, double*
     W_0[5+(NY0) * 5] = 50;
     W_0[6+(NY0) * 6] = 0.5;
     W_0[7+(NY0) * 7] = 0.5;
-    W_0[8+(NY0) * 8] = 800;
-    W_0[9+(NY0) * 9] = 800;
-    W_0[10+(NY0) * 10] = 1;
-    W_0[11+(NY0) * 11] = 1;
-    W_0[12+(NY0) * 12] = 10;
-    W_0[13+(NY0) * 13] = 10;
     ocp_nlp_cost_model_set(nlp_config, nlp_dims, nlp_in, 0, "W", W_0);
     free(W_0);
     double* yref = calloc(NY, sizeof(double));
@@ -555,12 +548,6 @@ void wamv_acados_setup_nlp_in(wamv_solver_capsule* capsule, const int N, double*
     W[5+(NY) * 5] = 50;
     W[6+(NY) * 6] = 0.5;
     W[7+(NY) * 7] = 0.5;
-    W[8+(NY) * 8] = 800;
-    W[9+(NY) * 9] = 800;
-    W[10+(NY) * 10] = 1;
-    W[11+(NY) * 11] = 1;
-    W[12+(NY) * 12] = 10;
-    W[13+(NY) * 13] = 10;
 
     for (int i = 1; i < N; i++)
     {
@@ -642,17 +629,11 @@ void wamv_acados_setup_nlp_in(wamv_solver_capsule* capsule, const int N, double*
     int* idxbu = malloc(NBU * sizeof(int));
     idxbu[0] = 0;
     idxbu[1] = 1;
-    idxbu[2] = 2;
-    idxbu[3] = 3;
     double* lubu = calloc(2*NBU, sizeof(double));
     double* lbu = lubu;
     double* ubu = lubu + NBU;
     ubu[0] = 2353;
     ubu[1] = 2353;
-    lbu[2] = -2;
-    ubu[2] = 2;
-    lbu[3] = -2;
-    ubu[3] = 2;
 
     for (int i = 0; i < N; i++)
     {
@@ -726,15 +707,6 @@ static void wamv_acados_create_set_opts(wamv_solver_capsule* capsule)
 
     int globalization_full_step_dual = 0;
     ocp_nlp_solver_opts_set(nlp_config, capsule->nlp_opts, "globalization_full_step_dual", &globalization_full_step_dual);
-    // TODO: these options are lower level -> should be encapsulated! maybe through hessian approx option.
-    bool output_z_val = true;
-    bool sens_algebraic_val = true;
-
-    for (int i = 0; i < N; i++)
-    {
-        ocp_nlp_solver_opts_set_at_stage(nlp_config, nlp_opts, i, "dynamics_output_z", &output_z_val);
-        ocp_nlp_solver_opts_set_at_stage(nlp_config, nlp_opts, i, "dynamics_sens_algebraic", &sens_algebraic_val);
-    }
 
     // set collocation type (relevant for implicit integrators)
     sim_collocation_type collocation_type = GAUSS_LEGENDRE;
@@ -938,8 +910,6 @@ int wamv_acados_reset(wamv_solver_capsule* capsule, int reset_qp_solver_mem)
         if (i<N)
         {
             ocp_nlp_out_set(nlp_config, nlp_dims, nlp_out, i, "pi", buffer);
-            ocp_nlp_set(nlp_solver, i, "xdot_guess", buffer);
-            ocp_nlp_set(nlp_solver, i, "z_guess", buffer);
         }
     }
 
@@ -954,7 +924,7 @@ int wamv_acados_update_params(wamv_solver_capsule* capsule, int stage, double *p
 {
     int solver_status = 0;
 
-    int casadi_np = 4;
+    int casadi_np = 2;
     if (casadi_np != np) {
         printf("acados_update_params: trying to set %i parameters for external functions."
             " External function has %i parameters. Exiting.\n", np, casadi_np);
@@ -1117,13 +1087,13 @@ int wamv_acados_free(wamv_solver_capsule* capsule)
     // dynamics
     for (int i = 0; i < N; i++)
     {
-        external_function_external_param_casadi_free(&capsule->impl_dae_fun[i]);
-        external_function_external_param_casadi_free(&capsule->impl_dae_fun_jac_x_xdot_z[i]);
-        external_function_external_param_casadi_free(&capsule->impl_dae_jac_x_xdot_u_z[i]);
+        external_function_external_param_casadi_free(&capsule->expl_vde_forw[i]);
+        external_function_external_param_casadi_free(&capsule->expl_ode_fun[i]);
+        external_function_external_param_casadi_free(&capsule->expl_vde_adj[i]);
     }
-    free(capsule->impl_dae_fun);
-    free(capsule->impl_dae_fun_jac_x_xdot_z);
-    free(capsule->impl_dae_jac_x_xdot_u_z);
+    free(capsule->expl_vde_adj);
+    free(capsule->expl_vde_forw);
+    free(capsule->expl_ode_fun);
 
     // cost
     external_function_external_param_casadi_free(&capsule->cost_y_0_fun);

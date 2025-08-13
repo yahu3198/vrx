@@ -18,9 +18,7 @@ def export_wamv_model() -> AcadosModel:
     # Controls
     Tp = SX.sym('Tp')
     Ts = SX.sym('Ts')
-    delta_p = SX.sym('delta_p')
-    delta_s = SX.sym('delta_s')
-    sym_u = vertcat(Tp, Ts, delta_p, delta_s)
+    sym_u = vertcat(Tp, Ts)
 
     # State derivatives
     x_dot = SX.sym('x_dot')
@@ -34,22 +32,20 @@ def export_wamv_model() -> AcadosModel:
     # parameters (new added)
     Tp_pre = SX.sym('Tp_pre')
     Ts_pre = SX.sym('Ts_pre')
-    delta_p_pre = SX.sym('delta_p_pre')
-    delta_s_pre = SX.sym('delta_s_pre')
-    sym_p = vertcat(Tp_pre,Ts_pre,delta_p_pre,delta_s_pre)
+    sym_p = vertcat(Tp_pre,Ts_pre)
 
-    # Slack variables for Δu
-    Tp_z = SX.sym('Tp_z')
-    Ts_z = SX.sym('Ts_z')
-    delta_p_z = SX.sym('delta_p_z')
-    delta_s_z = SX.sym('delta_s_z')
-    sym_z = vertcat(Tp_z,Ts_z,delta_p_z,delta_s_z)
+    # # Slack variables for Δu
+    # Tp_z = SX.sym('Tp_z')
+    # Ts_z = SX.sym('Ts_z')
+    # delta_p_z = SX.sym('delta_p_z')
+    # delta_s_z = SX.sym('delta_s_z')
+    # sym_z = vertcat(Tp_z,Ts_z,delta_p_z,delta_s_z)
 
 
     # System parameters
     m = 180
     Izz = 446
-    LCG = 2.373776
+    # LCG = 2.373776
     B = 2.05427
     added_mass = np.array([0, 0, 0, 0, 0, 0])
     M = np.diag([m + added_mass[0], m + added_mass[1], Izz + added_mass[5]])
@@ -59,9 +55,9 @@ def export_wamv_model() -> AcadosModel:
     nr, nrr = -800, -800
 
     # Thrust allocation
-    Tx = Tp * cos(delta_p) + Ts * cos(delta_s)
-    Ty = Tp * sin(delta_p) + Ts * sin(delta_s)
-    Mz = -LCG * Tp * cos(delta_p) - B/2 * Tp * sin(delta_p) - LCG * Ts * cos(delta_s) + B/2 * Ts * sin(delta_s)
+    Tx = Tp + Ts
+    Ty = 0
+    Mz = - B/2 * Tp + B/2 * Ts
 
     # Dynamics
     du = M_inv[0, 0] * (Tx + m * v * r + xu * u + xuu * fabs(u) * u)
@@ -72,12 +68,15 @@ def export_wamv_model() -> AcadosModel:
     dpsi = r
 
     f_expl = vertcat(dx, dy, dpsi, du, dv, dr)  # Size 6
-    f_impl_x = sym_xdot - f_expl  # Size 6
-    f_impl_z = sym_z - (sym_u - sym_p)  # Size 4, algebraic z = 0 (enforced via cost)
-    f_impl = vertcat(f_impl_x, f_impl_z)  # Size 10
+    f_impl = sym_xdot - f_expl  # Size 6
+    # f_impl_z = sym_z - (sym_u - sym_p)  # Size 4, algebraic z = 0 (enforced via cost)
+    # f_impl = vertcat(f_impl_x, f_impl_z)  # Size 10
+
+    # constraints
+    h_expr = sym_u
 
     # Cost
-    cost_y_expr = vertcat(sym_x, sym_u, sym_z)  # Size 14
+    cost_y_expr = vertcat(sym_x, sym_u)  
 
     model = AcadosModel()
     model.f_impl_expr = f_impl
@@ -85,7 +84,7 @@ def export_wamv_model() -> AcadosModel:
     model.x = sym_x
     model.xdot = sym_xdot  # Size 6
     model.u = sym_u
-    model.z = sym_z
+    # model.z = sym_z
     model.p = sym_p
     model.cost_y_expr = cost_y_expr
     model.cost_y_expr_e = sym_x
