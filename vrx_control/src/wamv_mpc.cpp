@@ -416,9 +416,9 @@ void WAMV_MPC::solve()
     // ocp_nlp_out_get(mpc_capsule->nlp_config, mpc_capsule->nlp_dims, mpc_capsule->nlp_out, 0, "u", (void *)acados_out.u0);
 
     acados_out.u0[0] = 200;
-    acados_out.u0[1] = 200;
-    acados_out.u0[2] = 1.57;
-    acados_out.u0[3] = 1.57;
+    acados_out.u0[1] = 100;
+    acados_out.u0[2] = 0;
+    acados_out.u0[3] = 0;
     // if(testfd_counter < 300){
     //     publish_cin(acados_out.u0[0], acados_out.u0[1], acados_out.u0[2], acados_out.u0[3]);
     //     testfd_counter++;
@@ -504,7 +504,7 @@ void WAMV_MPC::publish_cin(double Tp_mpc, double Ts_mpc, double delta_p_mpc, dou
     };
     
     // Define the fault type to simulate - change this to simulate different faults
-    static const int FAULT_TYPE_TO_SIMULATE = LEFT_THRUSTER_FAULT_SIM;  // Change as needed
+    static const int FAULT_TYPE_TO_SIMULATE = NO_FAULT_SIM;  // Change as needed
     
     // Apply fault at the fault trigger point
     if (iteration_count < fault_trigger) {
@@ -645,10 +645,13 @@ void WAMV_MPC::EKF()
     pre_ekf_pos.r = esti_x[5];
     // get input u and measuremnet y
     meas_u << solver_param.Tp_pre, solver_param.Ts_pre, solver_param.delta_p_pre, solver_param.delta_s_pre;
-    tau << meas_u[0] * cos(meas_u[2]) + meas_u[1] * cos(meas_u[3]),
-            meas_u[0] * sin(meas_u[2]) + meas_u[1] * sin(meas_u[3]),
-            -LCG * meas_u[0] * meas_u[2] - B/2 * meas_u[0] * sin(meas_u[2]) - LCG * meas_u[1] * cos(meas_u[3]) + B/2 * meas_u[1] * sin(meas_u[3]);
-    // meas_y << local_pos.x, local_pos.y, local_pos.psi,
+    // tau << meas_u[0] * cos(meas_u[2]) + meas_u[1] * cos(meas_u[3]),
+    //         meas_u[0] * sin(meas_u[2]) + meas_u[1] * sin(meas_u[3]),
+    //         -LCG * meas_u[0] * meas_u[2] - B/2 * meas_u[0] * sin(meas_u[2]) - LCG * meas_u[1] * cos(meas_u[3]) + B/2 * meas_u[1] * sin(meas_u[3]);
+    // if two fixed direction thrusters
+    tau << meas_u[0] + meas_u[1], 0, -LCG*meas_u[0]+LCG*meas_u[1];
+    
+            // meas_y << local_pos.x, local_pos.y, local_pos.psi,
     //         local_pos.u, local_pos.v, local_pos.r,
     //         tau(0),tau(1),tau(2);
     // Define Jacobian matrices of system dynamics and measurement model
