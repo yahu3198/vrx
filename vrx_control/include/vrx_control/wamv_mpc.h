@@ -58,8 +58,6 @@ class WAMV_MPC : public rclcpp::Node
     enum ControlInputs{
         u1 = 0,
         u2 = 1,
-        u3 = 2,
-        u4 = 3,
     };
 
     enum ThrusterFaultType {
@@ -138,8 +136,6 @@ class WAMV_MPC : public rclcpp::Node
     struct SolverParam{
         double Tp_pre;
         double Ts_pre;
-        double delta_p_pre;
-        double delta_s_pre;
     };
     struct ImuFilter{
         double p_smoothed, q_smoothed, r_smoothed;
@@ -229,7 +225,7 @@ class WAMV_MPC : public rclcpp::Node
 
     // EKF parameters
     // Matrix<double,6,1> wf_disturbance; // world frame disturbance 
-    Matrix<double,4,1> meas_u;      // inputs
+    Matrix<double,2,1> meas_u;      // inputs
     int n = 9;                     // state dimension
     int m = 9;                     // measurement dimension
     Matrix<double,9,1> meas_y;     // measurement vector
@@ -282,7 +278,7 @@ class WAMV_MPC : public rclcpp::Node
     double wpsi_threshold;
 
     // Previous thruster commands for comparison
-    double prev_Tp, prev_Ts, prev_delta_p, prev_delta_s;
+    double prev_Tp, prev_Ts;
     
     // Publishers for fault diagnosis results
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr fault_diagnosis_pub;
@@ -298,7 +294,7 @@ class WAMV_MPC : public rclcpp::Node
     std::vector<double> fault_confidences; // Vector to store confidence values for each fault type
     bool warmup_completed = false;
     const size_t warmup_iterations = 180;
-    std::deque<Vector4d> command_history; // For tracking thrust command history
+    std::deque<Vector2d> command_history; // For tracking thrust command history
 
     // Direct fault detection from simulation
     bool fault_simulation_active = false;
@@ -340,7 +336,7 @@ class WAMV_MPC : public rclcpp::Node
     int readDataFromFile(const char* fileName, std::vector<std::vector<double>> &data);     // read trajectory
     void ref_cb(int line_to_read);
     void solve();                                           // solve MPC
-    void publish_cin(double Tp_mpc, double Ts_mpc, double delta_p_mpc, double delta_s_mpc);
+    void publish_cin(double Tp_mpc, double Ts_mpc);
     void EKF();  
     MatrixXd RK4(MatrixXd x, MatrixXd u);                                           // EKF predict and update
     MatrixXd f(MatrixXd x, MatrixXd u);                     // system process model

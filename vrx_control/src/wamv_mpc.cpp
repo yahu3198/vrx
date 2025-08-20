@@ -43,13 +43,8 @@ WAMV_MPC::WAMV_MPC()
         "/wamv/sensors/position/ground_truth_odometry",
         20,
         std::bind(&WAMV_MPC::states_cb, this, std::placeholders::_1));
-    
-    left_thrust_angle_pub = this->create_publisher<std_msgs::msg::Float64>(
-        "/wamv/thrusters/left/pos", 20);
     left_thrust_cmd_pub = this->create_publisher<std_msgs::msg::Float64>(
         "/wamv/thrusters/left/thrust", 20);
-    right_thrust_angle_pub = this->create_publisher<std_msgs::msg::Float64>(
-        "/wamv/thrusters/right/pos", 20);
     right_thrust_cmd_pub = this->create_publisher<std_msgs::msg::Float64>(
         "/wamv/thrusters/right/thrust", 20);
     ref_pose_pub = this->create_publisher<nav_msgs::msg::Odometry>(
@@ -72,11 +67,6 @@ WAMV_MPC::WAMV_MPC()
     is_start = false;
     solver_param.Tp_pre = 0;
     solver_param.Ts_pre = 0;
-    solver_param.delta_p_pre = 0;
-    solver_param.delta_s_pre = 0;
-    // pre_pos.u = 0;
-    // pre_pos.v = 0;
-    // pre_pos.r = 0;
 
     Q_cov << 1e-3, 1e-3, 1e-3, 
             1e-2, 1e-2, 1e-2, 
@@ -137,8 +127,6 @@ WAMV_MPC::WAMV_MPC()
     // Initialize previous thruster commands
     prev_Tp = 0.0;
     prev_Ts = 0.0;
-    prev_delta_p = 0.0;
-    prev_delta_s = 0.0;
 
     // Initialize confidences
     fault_confidences.resize(3, 0.0); // Initialize with 3 zeros (one for each fault type)
@@ -375,12 +363,10 @@ void WAMV_MPC::solve()
     ocp_nlp_constraints_model_set(mpc_capsule->nlp_config,mpc_capsule->nlp_dims,mpc_capsule->nlp_in, 0, "ubx", acados_in.x0);
 
     // set parameters
-    double u_prev[4] = {solver_param.Tp_pre, solver_param.Ts_pre, solver_param.delta_p_pre, solver_param.delta_s_pre};
+    double u_prev[2] = {solver_param.Tp_pre, solver_param.Ts_pre};
     for (int i = 0; i <= WAMV_N; i++) {
         acados_param[i][0] = u_prev[0];  // Tp_prev
         acados_param[i][1] = u_prev[1];  // Ts_prev
-        acados_param[i][2] = u_prev[2];  // delta_p_prev
-        acados_param[i][3] = u_prev[3];  // delta_s_prev
         wamv_acados_update_params(mpc_capsule, i, acados_param[i], WAMV_NP);
     }
 
@@ -401,37 +387,27 @@ void WAMV_MPC::solve()
     }
 
     // Solve OCP
-    // acados_status = wamv_acados_solve(mpc_capsule);
+    acados_status = wamv_acados_solve(mpc_capsule);
 
-    // if (acados_status != 0){
-    //     RCLCPP_INFO(this->get_logger(), "acados returned status: %d", acados_status);
-    // }
+    if (acados_status != 0){
+        RCLCPP_INFO(this->get_logger(), "acados returned status: %d", acados_status);
+    }
 
-    // acados_out.status = acados_status;
-    // acados_out.kkt_res = (double)mpc_capsule->nlp_out->inf_norm_res;
+    acados_out.status = acados_status;
+    acados_out.kkt_res = (double)mpc_capsule->nlp_out->inf_norm_res;
 
-    // // ocp_nlp_get(mpc_capsule->nlp_config, mpc_capsule->nlp_solver, "time_tot", &acados_out.cpu_time);
-    // ocp_nlp_get(mpc_capsule->nlp_solver, "time_tot", &acados_out.cpu_time);
+    // ocp_nlp_get(mpc_capsule->nlp_config, mpc_capsule->nlp_solver, "time_tot", &acados_out.cpu_time);
+    ocp_nlp_get(mpc_capsule->nlp_solver, "time_tot", &acados_out.cpu_time);
 
-    // ocp_nlp_out_get(mpc_capsule->nlp_config, mpc_capsule->nlp_dims, mpc_capsule->nlp_out, 0, "u", (void *)acados_out.u0);
+    ocp_nlp_out_get(mpc_capsule->nlp_config, mpc_capsule->nlp_dims, mpc_capsule->nlp_out, 0, "u", (void *)acados_out.u0);
 
-    acados_out.u0[0] = 200;
-    acados_out.u0[1] = 100;
-    acados_out.u0[2] = 0;
-    acados_out.u0[3] = 0;
-    // if(testfd_counter < 300){
-    //     publish_cin(acados_out.u0[0], acados_out.u0[1], acados_out.u0[2], acados_out.u0[3]);
-    //     testfd_counter++;
-    // }
-    // else{
-    //     publish_cin(0, 0, acados_out.u0[2], acados_out.u0[3]);
-    // }
-    publish_cin(acados_out.u0[0], acados_out.u0[1], acados_out.u0[2], acados_out.u0[3]);
+    // acados_out.u0[0] = 200;
+    // acados_out.u0[1] = 200;
+    
+    publish_cin(acados_out.u0[0], acados_out.u0[1]);
     
     solver_param.Tp_pre = acados_out.u0[0];
     solver_param.Ts_pre = acados_out.u0[1];
-    solver_param.delta_p_pre = acados_out.u0[2];
-    solver_param.delta_s_pre = acados_out.u0[3];
 
     double current_time = rclcpp::Clock(RCL_SYSTEM_TIME).now().seconds();
     double z[4];
@@ -475,7 +451,7 @@ void WAMV_MPC::solve()
         std::cout << "ekf w_x:  " << esti_x[6] << "  w_y:  " << esti_x[7] << "  w_psi:  " << esti_x[8] << std::endl;
         std::cout << "calibrated w_psi: " << calibrated_wpsi << " (raw: " << esti_x[8] << ", expected: " << (Ts.data - Tp.data) * wpsi_coefficient << ")" << std::endl;
         std::cout << "ekf acc_x:  " << ekf_acc.x << "  acc_y:  " << ekf_acc.y << "  acc_psi:  " << ekf_acc.psi << std::endl;
-        std::cout << "Tp:  " << acados_out.u0[0] << "  Ts:  " << acados_out.u0[1] << "  delta_p:  " << acados_out.u0[2] << "  delta_s:  " << acados_out.u0[3] << std::endl;
+        std::cout << "Tp:  " << acados_out.u0[0] << "  Ts:  " << acados_out.u0[1] << std::endl;
         std::cout << "solve_time: "<< acados_out.cpu_time << "\tkkt_res: " << acados_out.kkt_res << "\tacados_status: " << acados_out.status << std::endl;
         std::cout << "relative_time: " << std::fixed << (current_time - start_time) << std::endl;
         std::cout << "Confidences NO_FAULT:  " << fault_confidences[0] << "  LEFT_THRUST_FAILURE:  " << fault_confidences[1] << "  RIGHT_THRUST_FAILURE:  " << fault_confidences[2] << std::endl;
@@ -493,7 +469,7 @@ void WAMV_MPC::solve()
     }
 }
 
-void WAMV_MPC::publish_cin(double Tp_mpc, double Ts_mpc, double delta_p_mpc, double delta_s_mpc)
+void WAMV_MPC::publish_cin(double Tp_mpc, double Ts_mpc)
 {
     // Use enum to track the fault type
     enum FaultSimulationType {
@@ -565,18 +541,10 @@ void WAMV_MPC::publish_cin(double Tp_mpc, double Ts_mpc, double delta_p_mpc, dou
     // Send actual values to thrusters
     left_thrust_cmd_pub->publish(Tp);
     right_thrust_cmd_pub->publish(Ts);
-   
-    delta_p.data = delta_p_mpc;
-    left_thrust_angle_pub->publish(delta_p);
-
-    delta_s.data = delta_s_mpc;
-    right_thrust_angle_pub->publish(delta_s);
 
     // Update control inputs message with actual values (not commanded values)
     control_inputs.header.stamp = rclcpp::Clock().now();
-    control_inputs.twist.linear.x = delta_p_mpc;
     control_inputs.twist.linear.y = Tp.data;  // Use actual Tp.data
-    control_inputs.twist.angular.x = delta_s_mpc;
     control_inputs.twist.angular.y = Ts.data; // Use actual Ts.data
     control_inputs_pub->publish(control_inputs);
 
@@ -644,7 +612,7 @@ void WAMV_MPC::EKF()
     pre_ekf_pos.v = esti_x[4];
     pre_ekf_pos.r = esti_x[5];
     // get input u and measuremnet y
-    meas_u << solver_param.Tp_pre, solver_param.Ts_pre, solver_param.delta_p_pre, solver_param.delta_s_pre;
+    meas_u << solver_param.Tp_pre, solver_param.Ts_pre;
     
     // if two fixed direction thrusters
     tau << meas_u[0] + meas_u[1], 0, -B/2*meas_u[0]+B/2*meas_u[1];
@@ -917,7 +885,7 @@ void WAMV_MPC::updateFaultModel() {
     }
     
     // Track command history for detecting unchanged commands
-    Vector4d current_command(Tp.data, Ts.data, delta_p.data, delta_s.data);
+    Vector2d current_command(Tp.data, Ts.data);
     command_history.push_back(current_command);
     if (command_history.size() > 50) {
         command_history.pop_front();
@@ -1032,8 +1000,6 @@ void WAMV_MPC::updateFaultModel() {
     // Store current commands for next iteration
     prev_Tp = Tp.data;
     prev_Ts = Ts.data;
-    prev_delta_p = delta_p.data;
-    prev_delta_s = delta_s.data;
     
     // Run the calibration routine (throttled internally)
     if (calibration_enabled && !fault_detected) {
@@ -1281,9 +1247,9 @@ bool WAMV_MPC::detectFault(const VectorXd& features, int& fault_type, std::vecto
     
     if (raw_fault_detected) {
         // Analyze current configuration
-        bool is_forward_motion = (std::abs(delta_p.data) < 0.2 && std::abs(delta_s.data) < 0.2);
-        bool is_right_turn = (delta_p.data > 1.0 && delta_s.data > 1.0);
-        bool is_left_turn = (delta_p.data < -1.0 && delta_s.data < -1.0);
+        bool is_forward_motion = (Tp.data == Ts.data);
+        bool is_right_turn = (Tp.data > Ts.data);
+        bool is_left_turn = (Tp.data < Ts.data);
         
         // Determine fault type based on trend direction after the turning point
         if (is_forward_motion) {
@@ -1620,8 +1586,7 @@ void WAMV_MPC::publishFaultDiagnosis(int fault_type, std::vector<double>& fault_
               << ", calibrated w_psi: " << calibrated_wpsi << "\033[0m" << std::endl;
               
     std::cout << "\033[1;36m" << "  Thrusts - Tp: " << Tp.data 
-              << ", Ts: " << Ts.data << ", delta_p: " << delta_p.data 
-              << ", delta_s: " << delta_s.data << "\033[0m" << std::endl;
+              << ", Ts: " << Ts.data << "\033[0m" << std::endl;
 }
 
 // Save the fault model to a file
@@ -1700,8 +1665,8 @@ void WAMV_MPC::calibrateDisturbanceModel()
     }
     
     // Only collect data during stable operation with no faults
-    static std::deque<Vector4d> command_history;
-    Vector4d current_command(Tp.data, Ts.data, delta_p.data, delta_s.data);
+    static std::deque<Vector2d> command_history;
+    Vector2d current_command(Tp.data, Ts.data);
     command_history.push_back(current_command);
     if (command_history.size() > 50) {
         command_history.pop_front();
@@ -1710,12 +1675,10 @@ void WAMV_MPC::calibrateDisturbanceModel()
     // Check if commands have been stable for a reasonable period
     bool commands_stable = true;
     if (command_history.size() > 20) {
-        Vector4d first_cmd = command_history[command_history.size() - 20];
+        Vector2d first_cmd = command_history[command_history.size() - 20];
         for (size_t i = command_history.size() - 19; i < command_history.size(); i++) {
             if (std::abs(command_history[i][0] - first_cmd[0]) > 10.0 || 
-                std::abs(command_history[i][1] - first_cmd[1]) > 10.0 ||
-                std::abs(command_history[i][2] - first_cmd[2]) > 0.1 ||
-                std::abs(command_history[i][3] - first_cmd[3]) > 0.1) {
+                std::abs(command_history[i][1] - first_cmd[1]) > 10.0) {
                 commands_stable = false;
                 break;
             }
@@ -1799,97 +1762,97 @@ double WAMV_MPC::getCalibrated_wpsi() const {
     return calibrated_wpsi;
 }
 
-WAMV_MPC::ThrusterConfiguration WAMV_MPC::analyzeThrusterConfiguration(
-    double tp, double ts, double delta_p, double delta_s) 
-{
-    ThrusterConfiguration config;
-    config.type = ThrusterConfiguration::UNKNOWN;
-    config.expected_wpsi = 0.0;
-    config.turn_direction = 0.0;
+// WAMV_MPC::ThrusterConfiguration WAMV_MPC::analyzeThrusterConfiguration(
+//     double tp, double ts, double delta_p, double delta_s) 
+// {
+//     ThrusterConfiguration config;
+//     config.type = ThrusterConfiguration::UNKNOWN;
+//     config.expected_wpsi = 0.0;
+//     config.turn_direction = 0.0;
     
-    // Classification based on thruster angles
-    bool is_forward_motion = (std::abs(delta_p) < 0.2 && std::abs(delta_s) < 0.2);
-    bool is_right_turn = (delta_p > 1.0 && delta_s > 1.0);
-    bool is_left_turn = (delta_p < -1.0 && delta_s < -1.0);
+//     // Classification based on thruster angles
+//     bool is_forward_motion = (std::abs(delta_p) < 0.2 && std::abs(delta_s) < 0.2);
+//     bool is_right_turn = (delta_p > 1.0 && delta_s > 1.0);
+//     bool is_left_turn = (delta_p < -1.0 && delta_s < -1.0);
     
-    // Calculate thrust differential
-    double thrust_diff = ts - tp;
+//     // Calculate thrust differential
+//     double thrust_diff = ts - tp;
     
-    // Calculate approximate forces and moments
-    if (is_forward_motion) {
-        // Forward motion classification
-        config.type = ThrusterConfiguration::FORWARD;
+//     // Calculate approximate forces and moments
+//     if (is_forward_motion) {
+//         // Forward motion classification
+//         config.type = ThrusterConfiguration::FORWARD;
         
-        // In forward motion, yaw moment is primarily from thrust differential
-        config.expected_wpsi = thrust_diff * wpsi_coefficient;
+//         // In forward motion, yaw moment is primarily from thrust differential
+//         config.expected_wpsi = thrust_diff * wpsi_coefficient;
         
-        // Set minimal turn direction indicator
-        config.turn_direction = (thrust_diff > 0) ? 0.1 : -0.1;
+//         // Set minimal turn direction indicator
+//         config.turn_direction = (thrust_diff > 0) ? 0.1 : -0.1;
         
-        // For nearly identical thrusts, expect minimal yaw
-        if (std::abs(thrust_diff) < 10.0) {
-            config.expected_wpsi = 0.0;
-            config.turn_direction = 0.0;
-        }
-    }
-    else if (is_right_turn) {
-        // Right turn classification (both thrusters angled right)
-        config.type = ThrusterConfiguration::TURNING;
-        config.turn_direction = 1.0;  // Right turn
+//         // For nearly identical thrusts, expect minimal yaw
+//         if (std::abs(thrust_diff) < 10.0) {
+//             config.expected_wpsi = 0.0;
+//             config.turn_direction = 0.0;
+//         }
+//     }
+//     else if (is_right_turn) {
+//         // Right turn classification (both thrusters angled right)
+//         config.type = ThrusterConfiguration::TURNING;
+//         config.turn_direction = 1.0;  // Right turn
         
-        // For right turns, expect significant positive wpsi
-        // This is just an approximate value - trend analysis is more important
-        config.expected_wpsi = 15.0;  // Typical value for (200,200,1.57,1.57)
+//         // For right turns, expect significant positive wpsi
+//         // This is just an approximate value - trend analysis is more important
+//         config.expected_wpsi = 15.0;  // Typical value for (200,200,1.57,1.57)
         
-        // Scale with thrust magnitude
-        double avg_thrust = (std::abs(tp) + std::abs(ts)) / 2.0;
-        if (avg_thrust > 0) {
-            config.expected_wpsi *= (avg_thrust / 200.0);
-        }
-    }
-    else if (is_left_turn) {
-        // Left turn classification (both thrusters angled left)
-        config.type = ThrusterConfiguration::TURNING;
-        config.turn_direction = -1.0;  // Left turn
+//         // Scale with thrust magnitude
+//         double avg_thrust = (std::abs(tp) + std::abs(ts)) / 2.0;
+//         if (avg_thrust > 0) {
+//             config.expected_wpsi *= (avg_thrust / 200.0);
+//         }
+//     }
+//     else if (is_left_turn) {
+//         // Left turn classification (both thrusters angled left)
+//         config.type = ThrusterConfiguration::TURNING;
+//         config.turn_direction = -1.0;  // Left turn
         
-        // For left turns, expect significant negative wpsi
-        config.expected_wpsi = -15.0;  // Approximate value
+//         // For left turns, expect significant negative wpsi
+//         config.expected_wpsi = -15.0;  // Approximate value
         
-        // Scale with thrust magnitude
-        double avg_thrust = (std::abs(tp) + std::abs(ts)) / 2.0;
-        if (avg_thrust > 0) {
-            config.expected_wpsi *= (avg_thrust / 200.0);
-        }
-    }
-    else {
-        // Mixed or complex configuration
-        double angle_diff = std::abs(delta_p - delta_s);
-        bool similar_direction = angle_diff < 0.25;
+//         // Scale with thrust magnitude
+//         double avg_thrust = (std::abs(tp) + std::abs(ts)) / 2.0;
+//         if (avg_thrust > 0) {
+//             config.expected_wpsi *= (avg_thrust / 200.0);
+//         }
+//     }
+//     else {
+//         // Mixed or complex configuration
+//         double angle_diff = std::abs(delta_p - delta_s);
+//         bool similar_direction = angle_diff < 0.25;
         
-        if (similar_direction) {
-            // Thrusters pointing in similar direction - likely turning
-            config.type = ThrusterConfiguration::TURNING;
+//         if (similar_direction) {
+//             // Thrusters pointing in similar direction - likely turning
+//             config.type = ThrusterConfiguration::TURNING;
             
-            // Calculate average angle to determine turn direction
-            double avg_angle = (delta_p + delta_s) / 2.0;
-            config.turn_direction = (avg_angle > 0) ? 1.0 : -1.0;
+//             // Calculate average angle to determine turn direction
+//             double avg_angle = (delta_p + delta_s) / 2.0;
+//             config.turn_direction = (avg_angle > 0) ? 1.0 : -1.0;
             
-            // Rough estimate of expected wpsi - less important for trend detection
-            config.expected_wpsi = avg_angle * 5.0;
-        }
-        else {
-            // Thrusters pointing in different directions - lateral or complex motion
-            config.type = ThrusterConfiguration::COMPLEX;
+//             // Rough estimate of expected wpsi - less important for trend detection
+//             config.expected_wpsi = avg_angle * 5.0;
+//         }
+//         else {
+//             // Thrusters pointing in different directions - lateral or complex motion
+//             config.type = ThrusterConfiguration::COMPLEX;
             
-            // Rough moment calculation for complex configurations
-            double port_lateral = tp * std::sin(delta_p);
-            double stbd_lateral = ts * std::sin(delta_s);
-            double net_lateral = port_lateral + stbd_lateral;
+//             // Rough moment calculation for complex configurations
+//             double port_lateral = tp * std::sin(delta_p);
+//             double stbd_lateral = ts * std::sin(delta_s);
+//             double net_lateral = port_lateral + stbd_lateral;
             
-            config.turn_direction = (net_lateral > 0) ? 0.5 : -0.5;
-            config.expected_wpsi = net_lateral * 0.05;
-        }
-    }
+//             config.turn_direction = (net_lateral > 0) ? 0.5 : -0.5;
+//             config.expected_wpsi = net_lateral * 0.05;
+//         }
+//     }
     
-    return config;
-}
+//     return config;
+// }

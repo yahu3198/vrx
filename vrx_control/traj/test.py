@@ -16,7 +16,7 @@ x0 = 0
 y0 = 0
 
 # trajectory
-traj = np.zeros((int(duration/sample_time+1),10)) # x y z phi theta psi u v w p q r u1 u2 u3 u4
+traj = np.zeros((int(duration/sample_time+1),8)) # x y psi u v r u1 u2
 t = np.arange(0,duration,sample_time)
 t = np.append(t, duration)
 
@@ -31,8 +31,6 @@ traj[:,4] = 0                       # v
 traj[:,5] = 0                       # r
 traj[:,6] = 0                       # u1
 traj[:,7] = 0                       # u2
-traj[:,8] = 0                       # u3
-traj[:,9] = 0                       # u4
 
 for i in range(0,int(duration/sample_time+1)):
     # X
