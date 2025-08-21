@@ -52,7 +52,7 @@ def export_wamv_model() -> AcadosModel:
     M_inv = np.linalg.inv(M)
     xu, xuu = -100, -150
     yv, yvv = -100, -100
-    nr, nrr = -800, -800
+    nr, nrr = -300, -300
 
     # Thrust allocation
     Tx = Tp + Ts

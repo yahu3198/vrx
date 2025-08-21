@@ -28,8 +28,8 @@ def main():
     ocp.parameter_values = np.zeros((nparam, ))
 
     # Cost
-    W_x = np.diag([1000, 200, 200, 200, 50, 50])     # x,y,psi,u,v,r
-    W_u = np.diag([0.5, 0.5])             # Tp,Ts
+    W_x = np.diag([10, 10, 150, 5, 5, 5])     # x,y,psi,u,v,r
+    W_u = np.diag([0.001, 0.001])             # Tp,Ts
     # W_du = np.diag([1, 1, 10, 10])        
     W = block_diag(W_x, W_u)
     ocp.cost.W = W
@@ -66,7 +66,7 @@ def main():
 
     # Reference
     x_ref = np.zeros(nx)
-    ocp.cost.yref = np.concatenate((x_ref, np.array([0.0, 0.0])))
+    ocp.cost.yref = np.concatenate((x_ref, np.array([1000.0, 1000.0])))
     ocp.cost.yref_e = x_ref
 
     # solver options

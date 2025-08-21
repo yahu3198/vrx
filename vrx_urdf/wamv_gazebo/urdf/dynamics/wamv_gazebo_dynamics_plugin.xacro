@@ -55,8 +55,8 @@
         <kPP>600.0</kPP>
         <mQ>900.0</mQ>
         <mQQ>900.0</mQQ>
-        <nR>800.0</nR>
-        <nRR>800.0</nRR>
+        <nR>300.0</nR>
+        <nRR>300.0</nRR>
       </plugin>
 
     </gazebo>

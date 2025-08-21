@@ -178,8 +178,8 @@ class WAMV_MPC : public rclcpp::Node
     double xuu = -150;
     double yv = -100;
     double yvv = -100;
-    double nr = -800;
-    double nrr = -800;
+    double nr = -300;
+    double nrr = -300;
     Matrix<double,1,3> M_values;
     Matrix<double,3,3> M;           // mass matrix
     Matrix<double,3,3> invM;        // inverse mass matrix
@@ -356,10 +356,10 @@ class WAMV_MPC : public rclcpp::Node
     void loadFaultModel(const std::string& filename);
     void calibrateDisturbanceModel();
     double getCalibrated_wpsi() const;
-    ThrusterConfiguration analyzeThrusterConfiguration(double tp, double ts, double delta_p, double delta_s);
-    bool detectFaultForConfiguration(const VectorXd& features, int& fault_type, 
-        std::vector<double>& fault_confidences,
-        const ThrusterConfiguration& config);
+    // ThrusterConfiguration analyzeThrusterConfiguration(double tp, double ts, double delta_p, double delta_s);
+    // bool detectFaultForConfiguration(const VectorXd& features, int& fault_type, 
+    //     std::vector<double>& fault_confidences,
+    //     const ThrusterConfiguration& config);
 
 };
 
