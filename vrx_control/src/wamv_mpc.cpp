@@ -480,7 +480,8 @@ void WAMV_MPC::publish_cin(double Tp_mpc, double Ts_mpc)
     };
     
     // Define the fault type to simulate - change this to simulate different faults
-    static const int FAULT_TYPE_TO_SIMULATE = NO_FAULT_SIM;  // Change as needed
+    static const int FAULT_TYPE_TO_SIMULATE = NO_FAULT_SIM;
+    float degrade_percentage = 0.9;
     
     // Apply fault at the fault trigger point
     if (iteration_count < fault_trigger) {
@@ -495,7 +496,7 @@ void WAMV_MPC::publish_cin(double Tp_mpc, double Ts_mpc)
         // Apply the selected fault simulation
         switch (FAULT_TYPE_TO_SIMULATE) {
             case LEFT_THRUSTER_FAULT_SIM:
-                Tp.data = 0.0;     // Port thruster fails (no force)
+                Tp.data = Tp_mpc*(1-degrade_percentage);     // Port thruster fails
                 Ts.data = Ts_mpc;  // Starboard thruster normal
                 
                 // Track the simulation state
@@ -507,7 +508,7 @@ void WAMV_MPC::publish_cin(double Tp_mpc, double Ts_mpc)
                 
             case RIGHT_THRUSTER_FAULT_SIM:
                 Tp.data = Tp_mpc;  // Port thruster normal
-                Ts.data = 0.0;     // Starboard thruster fails (no force)
+                Ts.data = Ts_mpc*(1-degrade_percentage);     // Starboard thruster fails
                 
                 // Track the simulation state
                 fault_simulation_active = true;
