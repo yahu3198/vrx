@@ -28,7 +28,7 @@ def main():
     ocp.parameter_values = np.zeros((nparam, ))
 
     # Cost
-    W_x = np.diag([10, 10, 150, 5, 5, 5])     # x,y,psi,u,v,r
+    W_x = np.diag([80, 10, 150, 5, 5, 5])     # x,y,psi,u,v,r
     W_u = np.diag([0.001, 0.001])             # Tp,Ts
     # W_du = np.diag([1, 1, 10, 10])        
     W = block_diag(W_x, W_u)
