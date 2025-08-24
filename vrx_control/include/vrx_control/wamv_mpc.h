@@ -390,6 +390,10 @@ class WAMV_MPC : public rclcpp::Node
     std::vector<std::vector<double>> generated_trajectory;  // For on-demand trajectory
     int generated_line_number;                              // Current position in generated trajectory
     bool trajectory_generation_active;                      // Flag for trajectory generation
+    bool mission_completed;
+    double arrival_time;
+    static constexpr double ARRIVAL_DISTANCE_THRESHOLD = 15.0;  // meters
+    static constexpr double ARRIVAL_CONFIRMATION_TIME = 2.0;   // seconds
 
     public:
 
@@ -428,6 +432,7 @@ class WAMV_MPC : public rclcpp::Node
     void updateOperationalMode();
     void ref_cb_enhanced(int line_to_read);
     double convertToContinuousPsi(double target_heading_bounded, double current_continuous_psi);
+    bool hasArrivedAtHarborZone();
 };
 
 #endif

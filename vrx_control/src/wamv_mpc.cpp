@@ -133,6 +133,9 @@ WAMV_MPC::WAMV_MPC()
 
     // Initialize confidences
     fault_confidences.resize(3, 0.0); // Initialize with 3 zeros (one for each fault type)
+
+    mission_completed = false;
+    arrival_time = 0.0;
 }
 
 // subscribe pos and vel
@@ -1062,6 +1065,28 @@ void WAMV_MPC::fastPlanning() {
     Vector2d current_position(local_pos.x, local_pos.y);
     double current_heading = local_pos.psi;
     
+    // Check if we're already very close to any harbor zone
+    for (size_t zone_idx = 0; zone_idx < harbor_zones.size(); zone_idx++) {
+        const HarborZone& zone = harbor_zones[zone_idx];
+        double distance = (zone.center - current_position).norm();
+        
+        // If very close to a zone, just target that zone
+        if (distance < 20.0) {
+            current_plan.selected_harbor_zone = zone_idx;
+            current_plan.target_point = zone.center;
+            current_plan.path_distance = distance;
+            current_plan.obstacle_free = true;
+            current_plan.feasibility_score = 200.0; // High score for close target
+            current_plan.is_valid = true;
+            
+            RCLCPP_INFO(this->get_logger(), 
+                       "Close proximity planning: Zone %zu, Distance %.1f m", 
+                       zone_idx, distance);
+            return;
+        }
+    }
+    
+    // Original planning logic for farther distances
     // Evaluate each harbor zone
     for (int zone_idx = 0; zone_idx < 3; zone_idx++) {
         const HarborZone& zone = harbor_zones[zone_idx];
@@ -1419,14 +1444,37 @@ void WAMV_MPC::generateAdaptiveReturnTrajectory() {
 void WAMV_MPC::updateOperationalMode() {
     OperationalMode previous_mode = current_mode;
     
+    // Check if mission is already completed
+    if (mission_completed) {
+        current_mode = STATION_KEEPING;
+        return;
+    }
+    
     // Mode switching logic based on fault status and iteration count
     if (iteration_count < fault_trigger) {
         // Before fault trigger - always follow preset trajectory
         current_mode = FOLLOW_PRESET_TRAJECTORY;
         trajectory_generation_active = false;
     } else {
-        // After fault trigger - switch to adaptive return mode
-        // TODO: Replace with actual mode selection algorithm
+        // After fault trigger - check if we've arrived at harbor zone
+        if (current_mode == ADAPTIVE_ASSISTED_RETURN && hasArrivedAtHarborZone()) {
+            // Mission completed! Switch to station keeping
+            mission_completed = true;
+            current_mode = STATION_KEEPING;
+            arrival_time = rclcpp::Clock(RCL_SYSTEM_TIME).now().seconds() - start_time;
+            
+            // Log successful arrival
+            RCLCPP_INFO(this->get_logger(), "🎉 SUCCESS: USV has arrived at harbor zone %d!", current_plan.selected_harbor_zone);
+            RCLCPP_INFO(this->get_logger(), "📍 Final position: (%.2f, %.2f)", local_pos.x, local_pos.y);
+            RCLCPP_INFO(this->get_logger(), "⏱️  Mission completion time: %.1f seconds", arrival_time);
+            RCLCPP_INFO(this->get_logger(), "🔄 Switching to STATION_KEEPING mode");
+            
+            // Generate station keeping trajectory at current position
+            generateStationKeepingTrajectory();
+            return;
+        }
+        
+        // Continue with adaptive return mode
         current_mode = ADAPTIVE_ASSISTED_RETURN;
         
         // Enable fast planning when switching to adaptive mode
@@ -1445,8 +1493,8 @@ void WAMV_MPC::updateOperationalMode() {
         }
     }
     
-    // Handle mode-specific updates
-    if (current_mode == ADAPTIVE_ASSISTED_RETURN) {
+    // Handle mode-specific updates (only if not completed)
+    if (current_mode == ADAPTIVE_ASSISTED_RETURN && !mission_completed) {
         // Update planning and regenerate trajectory if needed
         updatePlanningAndReference();
         
@@ -1562,4 +1610,34 @@ double WAMV_MPC::convertToContinuousPsi(double target_heading_bounded, double cu
     }
     
     return continuous_target;
+}
+
+// check if USV has arrived at harbor zone:
+bool WAMV_MPC::hasArrivedAtHarborZone() {
+    if (!current_plan.is_valid) {
+        return false;
+    }
+    
+    Vector2d current_pos(local_pos.x, local_pos.y);
+    double distance_to_target = (current_plan.target_point - current_pos).norm();
+    
+    // Check if within arrival threshold
+    if (distance_to_target <= ARRIVAL_DISTANCE_THRESHOLD) {
+        // Also check if we're actually inside any harbor zone
+        for (size_t zone_idx = 0; zone_idx < harbor_zones.size(); zone_idx++) {
+            if (pointInPolygon(current_pos, harbor_zones[zone_idx].vertices)) {
+                RCLCPP_INFO(this->get_logger(), "USV is inside harbor zone %zu at distance %.2f m from target", 
+                           zone_idx, distance_to_target);
+                return true;
+            }
+        }
+        
+        // If close to target but not in any zone, still consider arrival
+        if (distance_to_target <= 10.0) {
+            RCLCPP_INFO(this->get_logger(), "USV is very close to target (%.2f m), considering arrival", distance_to_target);
+            return true;
+        }
+    }
+    
+    return false;
 }
