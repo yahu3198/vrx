@@ -22,7 +22,7 @@
         <scene>scene</scene>
         <ambient_light>0.4 0.4 0.4</ambient_light>
         <background_color>0.8 0.8 0.8</background_color>
-        <camera_pose>-576 226 12 0 0.4 -0.3</camera_pose>
+        <camera_pose>-571 216.6 64 0 1.5708 0</camera_pose>
         <camera_clip>
           <near>0.25</near>
           <far>10000</far>
@@ -352,7 +352,7 @@
       <uri>coast_waves</uri>
     </include>
 
-    <include>
+    <!-- <include>
       <name>mb_marker_buoy_red</name>
       <pose>-528 191 0 0 0 0</pose>
       <uri>https://fuel.gazebosim.org/1.0/openrobotics/models/mb_marker_buoy_red</uri>
@@ -510,7 +510,7 @@
           <topic>/vrx/wavefield/parameters</topic>
         </wavefield>
       </plugin>
-    </include>
+    </include> -->
 
     <!-- The posts for securing the WAM-V -->
     <include>
@@ -634,6 +634,67 @@
         }
       </message>
     </plugin>
+
+    <!-- <plugin filename="libUSVWind.so" name="vrx::USVWind">
+      <wind_obj>
+        <name>wamv</name>
+        <link_name>wamv/base_link</link_name>
+        <coeff_vector>.5 .5 .33</coeff_vector>
+      </wind_obj> -->
+      
+      <!-- Moderate wind conditions for testing -->
+      <!-- <wind_direction>225</wind_direction>        
+      <wind_mean_velocity>8.0</wind_mean_velocity> 
+      <var_wind_gain_constants>0.3</var_wind_gain_constants> 
+      <var_wind_time_constants>10</var_wind_time_constants>   
+      <random_seed>42</random_seed>               
+      <update_rate>20</update_rate>               
+      
+      <topic_wind_speed>/vrx/debug/wind/speed</topic_wind_speed>
+      <topic_wind_direction>/vrx/debug/wind/direction</topic_wind_direction>
+    </plugin>
+
+    <plugin filename="libPublisherPlugin.so" name="vrx::PublisherPlugin">
+      <message type="gz.msgs.Param" topic="/vrx/wavefield/parameters" every="1.0"> -->
+        
+        <!-- Wave direction (coming FROM this direction) -->
+        <!-- <params>
+          <key>direction</key>
+          <value>
+            <type>DOUBLE</type>
+            <double_value>200.0</double_value> 
+          </value>
+        </params> -->
+        
+        <!-- Wave height (significant wave height) -->
+        <!-- <params>
+          <key>gain</key>
+          <value>
+            <type>DOUBLE</type>
+            <double_value>0.8</double_value> 
+          </value>
+        </params> -->
+        
+        <!-- Wave period -->
+        <!-- <params>
+          <key>period</key>
+          <value>
+            <type>DOUBLE</type>
+            <double_value>6.0</double_value> 
+          </value>
+        </params> -->
+        
+        <!-- Wave steepness -->
+        <!-- <params>
+          <key>steepness</key>
+          <value>
+            <type>DOUBLE</type>
+            <double_value>0.02</double_value> 
+          </value>
+        </params>
+        
+      </message>
+    </plugin> -->
 
   </world>
 </sdf>

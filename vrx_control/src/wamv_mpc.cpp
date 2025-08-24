@@ -117,12 +117,15 @@ WAMV_MPC::WAMV_MPC()
 
     fault_confidence_pub = this->create_publisher<std_msgs::msg::Float64MultiArray>(
         "/wamv/fault_confidences", 10);
+
+    initializeOperationalMode();
+    initializeHarborZones(); // From previous fast planning code
     
     // Initialize calibration data with reserved capacity
     calibration_data.reserve(1000);
     
     // Initialize fault diagnosis model
-    initializeFaultDiagnosis();
+    // initializeFaultDiagnosis();
     
     // Initialize previous thruster commands
     prev_Tp = 0.0;
@@ -380,7 +383,11 @@ void WAMV_MPC::solve()
     }
 
     // set reference
-    ref_cb(line_number); 
+    // Update operational mode and trajectory generation
+    updateOperationalMode();
+    
+    // Use enhanced reference callback instead of original ref_cb
+    ref_cb_enhanced(line_number);
     line_number++;
     for (unsigned int i = 0; i <= WAMV_N; i++){
         ocp_nlp_cost_model_set(mpc_capsule->nlp_config, mpc_capsule->nlp_dims, mpc_capsule->nlp_in, i, "yref", acados_in.yref[i]);
@@ -406,88 +413,23 @@ void WAMV_MPC::solve()
     
     publish_cin(acados_out.u0[0], acados_out.u0[1]);
     
-    solver_param.Tp_pre = acados_out.u0[0];
-    solver_param.Ts_pre = acados_out.u0[1];
-
-    double current_time = rclcpp::Clock(RCL_SYSTEM_TIME).now().seconds();
-    double z[4];
-    ocp_nlp_out_get(mpc_capsule->nlp_config, mpc_capsule->nlp_dims, mpc_capsule->nlp_out, 0, "z", z);
-    std::string fault_status;
-    std::string fault_color;
-    
-    if (fault_detected) {
-        switch (current_fault_type) {
-            case NO_FAULT:
-                fault_status = "NO_FAULT";
-                fault_color = "\033[32m"; // Green
-                break;
-            case LEFT_THRUST_FAILURE:
-                fault_status = "LEFT_THRUST_FAILURE";
-                fault_color = "\033[31m"; // Red
-                break;
-            case RIGHT_THRUST_FAILURE:
-                fault_status = "RIGHT_THRUST_FAILURE";
-                fault_color = "\033[31m"; // Red
-                break;
-            default:
-                fault_status = "UNKNOWN_FAULT";
-                fault_color = "\033[35m"; // Magenta
-        }
-    } else {
-        fault_status = "NORMAL";
-        fault_color = "\033[32m"; // Green
-    }
-    // Calculate calibrated w_psi for display
-    double calibrated_wpsi = getCalibrated_wpsi();
-
-    if(cout_counter > 2){
-        std::cout << "---------------------------------------------------------------------------------------------------------------------" << std::endl;
-        std::cout << "ref_x:    " << acados_in.yref[0][0] << "\tref_y:   " << acados_in.yref[0][1] << "\tref_yaw:    " << acados_in.yref[0][2] << std::endl;
-        std::cout << "error_x:  " << error_pose.pose.pose.position.x << "  error_y:  " << error_pose.pose.pose.position.y << "  error_psi:  " << yaw_error << std::endl;
-        std::cout << "pos_x:  " << local_pos.x << "  pos_y:  " << local_pos.y << "  psi:  " << yaw_sum << std::endl;
-        std::cout << "ekf pos_x:  " << esti_x[0] << "  pos_y:  " << esti_x[1] << "  psi:  " << esti_x[2] << std::endl;
-        std::cout << "vel_x:  " << local_pos.u << "  vel_y:  " << local_pos.v << "  vel_r:  " << local_pos.r << std::endl;
-        std::cout << "ekf vel_x:  " << esti_x[3] << "  vel_y:  " << esti_x[4] << "  vel_r:  " << esti_x[5] << std::endl;
-        std::cout << "ekf w_x:  " << esti_x[6] << "  w_y:  " << esti_x[7] << "  w_psi:  " << esti_x[8] << std::endl;
-        std::cout << "calibrated w_psi: " << calibrated_wpsi << " (raw: " << esti_x[8] << ", expected: " << (Ts.data - Tp.data) * wpsi_coefficient << ")" << std::endl;
-        std::cout << "ekf acc_x:  " << ekf_acc.x << "  acc_y:  " << ekf_acc.y << "  acc_psi:  " << ekf_acc.psi << std::endl;
-        std::cout << "Tp:  " << acados_out.u0[0] << "  Ts:  " << acados_out.u0[1] << std::endl;
-        std::cout << "solve_time: "<< acados_out.cpu_time << "\tkkt_res: " << acados_out.kkt_res << "\tacados_status: " << acados_out.status << std::endl;
-        std::cout << "relative_time: " << std::fixed << (current_time - start_time) << std::endl;
-        std::cout << "Confidences NO_FAULT:  " << fault_confidences[0] << "  LEFT_THRUST_FAILURE:  " << fault_confidences[1] << "  RIGHT_THRUST_FAILURE:  " << fault_confidences[2] << std::endl;
-        std::cout << "Confidences LEFT_ANGLE_FAILURE:  " << fault_confidences[3] << "  RIGHT_ANGLE_FAILURE:  " << fault_confidences[4] << std::endl;
-        std::cout << fault_color << "FAULT STATUS: " << fault_status;
-        if (fault_detected) {
-            std::cout << " (Confidence: " << std::fixed << std::setprecision(2) << fault_detection_confidence * 100.0 << "%)";
-        }
-        std::cout << "\033[0m" << std::endl; // Reset color
-        std::cout << "---------------------------------------------------------------------------------------------------------------------" << std::endl;
-        cout_counter = 0;
-    }
-    else{
-        cout_counter++;
-    }
 }
 
 void WAMV_MPC::publish_cin(double Tp_mpc, double Ts_mpc)
 {
-    // Use enum to track the fault type
-    enum FaultSimulationType {
-        NO_FAULT_SIM = 0,
-        LEFT_THRUSTER_FAULT_SIM = 1,
-        RIGHT_THRUSTER_FAULT_SIM = 2,
-        BOTH_THRUSTERS_FAULT_SIM = 3
-    };
-    
-    // Define the fault type to simulate - change this to simulate different faults
-    static const int FAULT_TYPE_TO_SIMULATE = NO_FAULT_SIM;
-    float degrade_percentage = 0.9;
+    std::string fault_status;
+    std::string fault_color;
+    std::string mode_color;
+    std::string mode_name;
     
     // Apply fault at the fault trigger point
     if (iteration_count < fault_trigger) {
         // Normal operation before fault trigger
         Tp.data = Tp_mpc;
         Ts.data = Ts_mpc;
+
+        fault_status = "NORMAL";
+        fault_color = "\033[32m"; // Green
         
         // Reset simulation tracking
         fault_simulation_active = false;
@@ -496,41 +438,42 @@ void WAMV_MPC::publish_cin(double Tp_mpc, double Ts_mpc)
         // Apply the selected fault simulation
         switch (FAULT_TYPE_TO_SIMULATE) {
             case LEFT_THRUSTER_FAULT_SIM:
-                Tp.data = Tp_mpc*(1-degrade_percentage);     // Port thruster fails
+                fault_detected = true;
+                Tp.data = Tp_mpc*(1-thruster_degrade_percentage);     // Port thruster fails
                 Ts.data = Ts_mpc;  // Starboard thruster normal
                 
                 // Track the simulation state
                 fault_simulation_active = true;
                 simulated_fault_type = LEFT_THRUST_FAILURE;
+
+                fault_status = "LEFT_THRUST_FAILURE";
+                fault_color = "\033[31m"; // Red
                 
-                RCLCPP_INFO(this->get_logger(), "Simulating port thruster force failure at iteration %zu", iteration_count);
+                // RCLCPP_INFO(this->get_logger(), "Simulating port thruster force failure at iteration %zu", iteration_count);
                 break;
                 
             case RIGHT_THRUSTER_FAULT_SIM:
+                fault_detected = true;
                 Tp.data = Tp_mpc;  // Port thruster normal
-                Ts.data = Ts_mpc*(1-degrade_percentage);     // Starboard thruster fails
+                Ts.data = Ts_mpc*(1-thruster_degrade_percentage);     // Starboard thruster fails
                 
                 // Track the simulation state
                 fault_simulation_active = true;
                 simulated_fault_type = RIGHT_THRUST_FAILURE;
+
+                fault_status = "RIGHT_THRUST_FAILURE";
+                fault_color = "\033[31m"; // Red
                 
-                RCLCPP_INFO(this->get_logger(), "Simulating starboard thruster force failure at iteration %zu", iteration_count);
-                break;
-                
-            case BOTH_THRUSTERS_FAULT_SIM:
-                Tp.data = 0.0;     // Port thruster fails
-                Ts.data = 0.0;     // Starboard thruster fails
-                
-                // Not tracking this case specifically
-                fault_simulation_active = true;
-                simulated_fault_type = LEFT_THRUST_FAILURE; // Arbitrary choice
-                
-                RCLCPP_INFO(this->get_logger(), "Simulating both thrusters force failure at iteration %zu", iteration_count);
+                // RCLCPP_INFO(this->get_logger(), "Simulating starboard thruster force failure at iteration %zu", iteration_count);
                 break;
                 
             default:
+                fault_detected = false;
                 Tp.data = Tp_mpc;  // Normal operation
                 Ts.data = Ts_mpc;
+
+                fault_status = "NORMAL";
+                fault_color = "\033[32m"; // Green
                 
                 fault_simulation_active = false;
                 simulated_fault_type = NO_FAULT;
@@ -538,6 +481,24 @@ void WAMV_MPC::publish_cin(double Tp_mpc, double Ts_mpc)
         }
     }
     iteration_count++;
+
+    switch (current_mode) {
+        case FOLLOW_PRESET_TRAJECTORY:
+            mode_name = "PRESET_TRAJ";
+            mode_color = "\033[36m"; // Cyan
+            break;
+        case STATION_KEEPING:
+            mode_name = "STATION_KEEP";
+            mode_color = "\033[33m"; // Yellow
+            break;
+        case ADAPTIVE_ASSISTED_RETURN:
+            mode_name = "ADAPTIVE_RETURN";
+            mode_color = "\033[35m"; // Magenta
+            break;
+        default:
+            mode_name = "UNKNOWN";
+            mode_color = "\033[37m"; // White
+    }
     
     // Send actual values to thrusters
     left_thrust_cmd_pub->publish(Tp);
@@ -584,27 +545,70 @@ void WAMV_MPC::publish_cin(double Tp_mpc, double Ts_mpc)
 
     error_pose_pub->publish(error_pose);
 
-    // // publish ekf states
-    // tf2::Quaternion quat_ekf;
-    // quat_ekf.setRPY(0, 0, esti_x[2]);
-    // geometry_msgs::msg::Quaternion quat_ekf_msg;
-    // tf2::convert(quat_ekf, quat_ekf_msg);
-    // ekf_pose.pose.pose.position.x = esti_x[0];
-    // ekf_pose.pose.pose.position.y = esti_x[1];
-    // ekf_pose.pose.pose.orientation.x = quat_ekf_msg.x;
-    // ekf_pose.pose.pose.orientation.y = quat_ekf_msg.y;
-    // ekf_pose.pose.pose.orientation.z = quat_ekf_msg.z;
-    // ekf_pose.pose.pose.orientation.w = quat_ekf_msg.w;
-    // ekf_pose.twist.twist.linear.x = esti_x[3];
-    // ekf_pose.twist.twist.linear.y = esti_x[4];
-    // ekf_pose.twist.twist.angular.z = esti_x[5];
-    // ekf_pose.header.stamp = rclcpp::Clock().now();
-    // ekf_pose.header.frame_id = "odom_frame";
-    // ekf_pose.child_frame_id = "base_link";
 
-    // ekf_pose_pub->publish(ekf_pose);
+    solver_param.Tp_pre = acados_out.u0[0];
+    solver_param.Ts_pre = acados_out.u0[1];
 
+    double current_time = rclcpp::Clock(RCL_SYSTEM_TIME).now().seconds();
+    double z[4];
+    ocp_nlp_out_get(mpc_capsule->nlp_config, mpc_capsule->nlp_dims, mpc_capsule->nlp_out, 0, "z", z);
+    
+    // Calculate calibrated w_psi for display
+    // double calibrated_wpsi = getCalibrated_wpsi();
 
+    if(cout_counter > 2){
+        std::cout << "---------------------------------------------------------------------------------------------------------------------" << std::endl;
+        // ENHANCED: Add operational mode status line
+        std::cout << mode_color << "OPERATIONAL MODE: " << mode_name 
+                << " | Iteration: " << iteration_count 
+                << " | Fault Trigger: " << fault_trigger;
+        if (trajectory_generation_active) {
+            std::cout << " | Generated Traj: " << generated_line_number 
+                    << "/" << generated_trajectory.size();
+        }
+        if (current_mode == ADAPTIVE_ASSISTED_RETURN && current_plan.is_valid) {
+            std::cout << " | Target Zone: " << current_plan.selected_harbor_zone
+                    << " | Target: (" << std::fixed << std::setprecision(1) 
+                    << current_plan.target_point.x() << ", " << current_plan.target_point.y() << ")";
+        }
+        std::cout << "\033[0m" << std::endl;
+        std::cout << "ref_x:    " << acados_in.yref[0][0] << "\tref_y:   " << acados_in.yref[0][1] << "\tref_yaw:    " << acados_in.yref[0][2] << std::endl;
+        std::cout << "error_x:  " << error_pose.pose.pose.position.x << "  error_y:  " << error_pose.pose.pose.position.y << "  error_psi:  " << yaw_error << std::endl;
+        std::cout << "pos_x:  " << local_pos.x << "  pos_y:  " << local_pos.y << "  psi:  " << yaw_sum << std::endl;
+        std::cout << "ekf pos_x:  " << esti_x[0] << "  pos_y:  " << esti_x[1] << "  psi:  " << esti_x[2] << std::endl;
+        std::cout << "vel_x:  " << local_pos.u << "  vel_y:  " << local_pos.v << "  vel_r:  " << local_pos.r << std::endl;
+        std::cout << "ekf vel_x:  " << esti_x[3] << "  vel_y:  " << esti_x[4] << "  vel_r:  " << esti_x[5] << std::endl;
+        std::cout << "ekf w_x:  " << esti_x[6] << "  w_y:  " << esti_x[7] << "  w_psi:  " << esti_x[8] << std::endl;
+        // std::cout << "calibrated w_psi: " << calibrated_wpsi << " (raw: " << esti_x[8] << ", expected: " << (Ts.data - Tp.data) * wpsi_coefficient << ")" << std::endl;
+        std::cout << "ekf acc_x:  " << ekf_acc.x << "  acc_y:  " << ekf_acc.y << "  acc_psi:  " << ekf_acc.psi << std::endl;
+        std::cout << "Tp:  " << acados_out.u0[0] << "  Ts:  " << acados_out.u0[1] << std::endl;
+        std::cout << "solve_time: "<< acados_out.cpu_time << "\tkkt_res: " << acados_out.kkt_res << "\tacados_status: " << acados_out.status << std::endl;
+        std::cout << "relative_time: " << std::fixed << (current_time - start_time) << std::endl;
+        std::cout << fault_color << "FAULT STATUS: " << fault_status;
+        if (fault_detected) {
+            std::cout << " (Thruster degrad with: " <<  thruster_degrade_percentage * 100.0 << "%)";
+        }
+        std::cout << "\033[0m" << std::endl; // Reset color
+        std::cout << fault_color << "FAULT STATUS: " << fault_status;
+        // if (fault_detected) {
+        //     std::cout << " (Confidence: " << std::fixed << std::setprecision(2) << fault_detection_confidence * 100.0 << "%)";
+        // }
+        // std::cout << "\033[0m" << std::endl;
+        
+        // ENHANCED: Add planning status for adaptive mode
+        if (current_mode == ADAPTIVE_ASSISTED_RETURN && current_plan.is_valid) {
+            std::cout << "\033[35m" << "PLANNING STATUS: Distance=" << std::fixed << std::setprecision(1) 
+                    << current_plan.path_distance << "m | EnvAlign=" << std::setprecision(2) 
+                    << current_plan.environmental_alignment << " | Score=" << std::setprecision(1) 
+                    << current_plan.feasibility_score << " | ObstacleFree=" 
+                    << (current_plan.obstacle_free ? "YES" : "NO") << "\033[0m" << std::endl;
+        }
+        std::cout << "---------------------------------------------------------------------------------------------------------------------" << std::endl;
+        cout_counter = 0;
+    }
+    else{
+        cout_counter++;
+    }
 }
 
 void WAMV_MPC::EKF()
@@ -824,1036 +828,738 @@ MatrixXd WAMV_MPC::compute_jacobian_H_imu(MatrixXd x) {
     return H;
 }
 
-void WAMV_MPC::initializeFaultDiagnosis() {
-    // Print initial configuration for debugging
-    std::cout << "\033[1;32m" << "Initializing Fault Diagnosis System" << "\033[0m" << std::endl;
+void WAMV_MPC::assessCurrentSituation() {
+    SituationAssessment assessment;
     
-    // Initialize fault detection parameters
-    detection_counter = 0;
-    fault_detected = false;
-    current_fault_type = NO_FAULT;
-    fault_detection_confidence = 0.0;
+    // Record assessment time
+    assessment.assessment_time = rclcpp::Clock(RCL_SYSTEM_TIME).now().seconds() - start_time;
     
-    // Initialize the online logistic regression model
-    fault_model.feature_dim = 12; // Expanded feature set including turning points and thrust stability
-    fault_model.weights = MatrixXd::Zero(fault_model.feature_dim, 5); // 5 classes (no fault + 4 fault types)
-    fault_model.bias = 0.0;
-    fault_model.learning_rate = 0.01;
-    fault_model.lambda = 0.001;
-    fault_model.buffer_size = window_size;
-    fault_model.detect_threshold = 0.65;
-    
-    // Initialize the disturbance buffer
-    dist_buffer.clear();
-    for (int i = 0; i < window_size; i++) {
-        dist_buffer.push_back(Vector3d::Zero());
-    }
-    
-    // Initialize command history
-    command_history.clear();
-    
-    // Try to load a pre-trained model if available
-    try {
-        loadFaultModel("fault_model.csv");
-        RCLCPP_INFO(this->get_logger(), "Loaded pre-trained fault diagnosis model");
-    } catch (...) {
-        RCLCPP_INFO(this->get_logger(), "No pre-trained model found, starting with a new model");
-        
-        // Initialize weights to help with early detection of turning points
-        // For LEFT_THRUST_FAILURE: positive change in wpsi
-        fault_model.weights(5, LEFT_THRUST_FAILURE) = 2.0;  // Positive weight for wpsi change
-        fault_model.weights(8, LEFT_THRUST_FAILURE) = 1.5;  // Strong weight for wpsi turning point
-        
-        // For RIGHT_THRUST_FAILURE: negative change in wpsi
-        fault_model.weights(5, RIGHT_THRUST_FAILURE) = -2.0; // Negative weight for wpsi change
-        fault_model.weights(8, RIGHT_THRUST_FAILURE) = 1.5;  // Strong weight for wpsi turning point
-        
-        // For both thrust failures: thrust commands unchanged during disturbance change
-        if (fault_model.feature_dim >= 10) {
-            fault_model.weights(9, LEFT_THRUST_FAILURE) = 1.0;  // Thrust unchanged
-            fault_model.weights(9, RIGHT_THRUST_FAILURE) = 1.0; // Thrust unchanged
-        }
-    }
-}
-
-// Update the fault model with new disturbance information
-void WAMV_MPC::updateFaultModel() {
-    // Add the current disturbance to the buffer
-    Vector3d current_dist(esti_x[6], esti_x[7], esti_x[8]);
-    dist_buffer.push_back(current_dist);
-    if (dist_buffer.size() > static_cast<size_t>(window_size)) {
-        dist_buffer.pop_front();
-    }
-    
-    // Track command history for detecting unchanged commands
-    Vector2d current_command(Tp.data, Ts.data);
-    command_history.push_back(current_command);
-    if (command_history.size() > 50) {
-        command_history.pop_front();
-    }
-    
-    // Skip fault detection during warmup
-    if (iteration_count < warmup_iterations) {
-        warmup_completed = false;
-        return;
-    } else if (!warmup_completed) {
-        warmup_completed = true;
-        RCLCPP_INFO(this->get_logger(), "Warmup completed, fault detection active");
-    }
-    
-    // Extract features
-    VectorXd features(fault_model.feature_dim);
-    extractFeatures(features);
-    
-    // Publish features for debugging
-    auto feature_msg = std::make_unique<std_msgs::msg::Float64MultiArray>();
-    feature_msg->data.resize(fault_model.feature_dim);
-    for (int i = 0; i < fault_model.feature_dim; i++) {
-        feature_msg->data[i] = features[i];
-    }
-    fault_features_pub->publish(*feature_msg);
-    
-    // Use model-based fault detection
-    int detected_fault;
-    bool is_fault = detectFault(features, detected_fault, fault_confidences);
-    
-    // State machine for fault status with faster confirmation
-    static int same_fault_counter = 0;
-    static int no_fault_counter = 0;
-    static double first_detection_time = 0.0;
-    
-    if (is_fault) {
-        // Record time of first detection
-        if (same_fault_counter == 0) {
-            first_detection_time = rclcpp::Clock(RCL_SYSTEM_TIME).now().seconds() - start_time;
-        }
-        
-        // Check if it's the same fault as before
-        if (detected_fault == current_fault_type) {
-            same_fault_counter++;
-        } else {
-            same_fault_counter = 1;
-            current_fault_type = detected_fault;
-        }
-        
-        // ULTRA-FAST: only need a single detection for thrust failures!
-        // This dramatically reduces detection delay
-        int required_detections = 1; // Requires only a single detection
-        
-        // After enough consistent detections, confirm the fault
-        if (same_fault_counter >= required_detections) {
-            if (!fault_detected || current_fault_type != detected_fault) {
-                fault_detected = true;
-                current_fault_type = detected_fault;
-                fault_detection_confidence = fault_confidences[detected_fault];
-                
-                double detection_time = rclcpp::Clock(RCL_SYSTEM_TIME).now().seconds() - start_time;
-                
-                // Report fault with detection timing info
-                RCLCPP_INFO(this->get_logger(), 
-                          "FAULT CONFIRMED - Type: %d, First detection: %.2fs, Confirmed: %.2fs, Delay: %.2fs",
-                          current_fault_type, first_detection_time, detection_time, 
-                          detection_time - first_detection_time);
-                
-                publishFaultDiagnosis(current_fault_type, fault_confidences);
-                
-                // Train the model with the detected fault
-                logisticRegressionUpdate(features, current_fault_type);
-            }
-        }
-        
-        no_fault_counter = 0;
+    // ===== FAULT AND CAPABILITY ASSESSMENT =====
+    if (iteration_count < fault_trigger || FAULT_TYPE_TO_SIMULATE == NO_FAULT_SIM) {
+        // No fault scenario
+        assessment.remaining_thrust_capability = 1.0;
+        assessment.control_authority_loss = 0.0;
+        assessment.left_thruster_operational = true;
+        assessment.right_thruster_operational = true;
     } else {
-        // No fault detected
-        same_fault_counter = 0;
-        no_fault_counter++;
+        // Fault scenario - one thruster degraded
+        assessment.remaining_thrust_capability = 1.0 - thruster_degrade_percentage;
+        assessment.control_authority_loss = thruster_degrade_percentage;
         
-        // Need more consecutive "no fault" detections to clear a fault (more conservative)
-        if (no_fault_counter >= detection_count_threshold * 3) {
-            if (fault_detected) {
-                fault_detected = false;
-                current_fault_type = NO_FAULT;
-                fault_confidences[NO_FAULT] = 0.9;
-                publishFaultDiagnosis(NO_FAULT, fault_confidences);
-                
-                // Train the model with NO_FAULT example
-                logisticRegressionUpdate(features, NO_FAULT);
+        // Determine which thruster is operational
+        assessment.left_thruster_operational = (FAULT_TYPE_TO_SIMULATE != LEFT_THRUSTER_FAULT_SIM);
+        assessment.right_thruster_operational = (FAULT_TYPE_TO_SIMULATE != RIGHT_THRUSTER_FAULT_SIM);
+    }
+    
+    // ===== ENVIRONMENTAL FORCE ASSESSMENT =====
+    assessment.environmental_forces = Vector3d(esti_x[6], esti_x[7], esti_x[8]);
+    assessment.environmental_force_magnitude = assessment.environmental_forces.norm();
+    
+    // ===== POSITION AND NAVIGATION ASSESSMENT =====
+    Vector2d current_position(local_pos.x, local_pos.y);
+    Vector2d port_position(-537.0, 146.0);  // Harbor center
+    
+    Vector2d position_error = port_position - current_position;
+    assessment.distance_to_port = position_error.norm();
+    
+    if (assessment.distance_to_port > 1e-6) {
+        assessment.direction_to_port = position_error / assessment.distance_to_port;
+    } else {
+        assessment.direction_to_port = Vector2d(1.0, 0.0);  // Default direction
+    }
+    
+    assessment.heading_to_port = atan2(position_error.y(), position_error.x());
+    assessment.current_heading = local_pos.psi;
+    assessment.heading_error = assessment.heading_to_port - assessment.current_heading;
+    
+    // Normalize heading error to [-pi, pi]
+    while (assessment.heading_error > M_PI) assessment.heading_error -= 2.0 * M_PI;
+    while (assessment.heading_error < -M_PI) assessment.heading_error += 2.0 * M_PI;
+    
+}
+
+void WAMV_MPC::initializeHarborZones() {
+    // Initialize harbor zones with corrected coordinates
+    harbor_zones.clear();
+    harbor_zones.resize(3);
+    
+    // Harbor Zone 1: [-580, 258], [-575, 240], [-600, 236], [-600, 248]
+    harbor_zones[0].vertices = {
+        Vector2d(-580, 258), Vector2d(-575, 240), 
+        Vector2d(-600, 236), Vector2d(-600, 248)
+    };
+    
+    // Harbor Zone 2: [-575, 222], [-575, 208], [-595, 208], [-595, 220]
+    harbor_zones[1].vertices = {
+        Vector2d(-575, 222), Vector2d(-575, 208),
+        Vector2d(-595, 208), Vector2d(-595, 220)
+    };
+    
+    // Harbor Zone 3: [-573, 192], [-593, 191], [-593, 183], [-584, 184]
+    harbor_zones[2].vertices = {
+        Vector2d(-573, 192), Vector2d(-593, 191),
+        Vector2d(-593, 183), Vector2d(-584, 184)
+    };
+    
+    // Calculate centers for each zone
+    for (auto& zone : harbor_zones) {
+        Vector2d center_sum(0, 0);
+        for (const auto& vertex : zone.vertices) {
+            center_sum += vertex;
+        }
+        zone.center = center_sum / zone.vertices.size();
+    }
+    
+    // Initialize dock areas (obstacles to avoid)
+    dock_areas.clear();
+    dock_areas.resize(2);
+    
+    // Dock 1: [-575, 240], [-575, 222], [-595, 220], [-600, 236]
+    dock_areas[0] = {
+        Vector2d(-575, 240), Vector2d(-575, 222),
+        Vector2d(-595, 220), Vector2d(-600, 236)
+    };
+    
+    // Dock 2: [-575, 208], [-573, 192], [-593, 191], [-595, 208]
+    dock_areas[1] = {
+        Vector2d(-575, 208), Vector2d(-573, 192),
+        Vector2d(-593, 191), Vector2d(-595, 208)
+    };
+    
+    // Initialize planning variables
+    last_replan_time = 0.0;
+    current_plan.is_valid = false;
+    
+    RCLCPP_INFO(this->get_logger(), "Harbor zones initialized successfully");
+}
+
+bool WAMV_MPC::pointInPolygon(const Vector2d& point, const std::vector<Vector2d>& polygon) {
+    bool inside = false;
+    int n = polygon.size();
+    
+    for (int i = 0, j = n - 1; i < n; j = i++) {
+        if (((polygon[i].y() > point.y()) != (polygon[j].y() > point.y())) &&
+            (point.x() < (polygon[j].x() - polygon[i].x()) * (point.y() - polygon[i].y()) / 
+             (polygon[j].y() - polygon[i].y()) + polygon[i].x())) {
+            inside = !inside;
+        }
+    }
+    return inside;
+}
+
+bool WAMV_MPC::lineIntersectsPolygon(const Vector2d& start, const Vector2d& end, 
+                                    const std::vector<Vector2d>& polygon) {
+    // Check if line segment intersects with any edge of the polygon
+    int n = polygon.size();
+    
+    for (int i = 0; i < n; i++) {
+        Vector2d p1 = polygon[i];
+        Vector2d p2 = polygon[(i + 1) % n];
+        
+        // Line segment intersection check using cross products
+        Vector2d dir1 = end - start;
+        Vector2d dir2 = p2 - p1;
+        Vector2d diff = start - p1;
+        
+        double cross = dir1.x() * dir2.y() - dir1.y() * dir2.x();
+        
+        if (std::abs(cross) > 1e-6) {  // Lines are not parallel
+            double t = (diff.x() * dir2.y() - diff.y() * dir2.x()) / cross;
+            double u = (diff.x() * dir1.y() - diff.y() * dir1.x()) / cross;
+            
+            if (t >= 0 && t <= 1 && u >= 0 && u <= 1) {
+                return true;  // Intersection found
             }
         }
     }
-    
-    // Periodically train on current data regardless of fault status 
-    // This helps the model learn normal operation patterns too
-    static int training_counter = 0;
-    if (++training_counter % 20 == 0) {
-        // Use the current fault status as the label
-        int training_label = fault_detected ? current_fault_type : NO_FAULT;
-        logisticRegressionUpdate(features, training_label);
-    }
-    
-    // Occasionally save the model
-    static int save_counter = 0;
-    if (++save_counter % 5000 == 0) {
-        saveFaultModel("fault_model.csv");
-        RCLCPP_INFO(this->get_logger(), "Saved fault model to fault_model.csv");
-    }
-    
-    // Store current commands for next iteration
-    prev_Tp = Tp.data;
-    prev_Ts = Ts.data;
-    
-    // Run the calibration routine (throttled internally)
-    if (calibration_enabled && !fault_detected) {
-        calibrateDisturbanceModel();
-    }
+    return false;
 }
 
-// Extract features from the disturbance buffer
-void WAMV_MPC::extractFeatures(VectorXd& features) {
-    // Calculate statistics on the disturbance buffer
-    Vector3d mean = Vector3d::Zero();
-    Vector3d variance = Vector3d::Zero();
-    
-    // Calculate mean
-    for (const auto& dist : dist_buffer) {
-        mean += dist;
-    }
-    mean /= dist_buffer.size();
-    
-    // Calculate variance
-    for (const auto& dist : dist_buffer) {
-        variance[0] += (dist[0] - mean[0]) * (dist[0] - mean[0]);
-        variance[1] += (dist[1] - mean[1]) * (dist[1] - mean[1]);
-        variance[2] += (dist[2] - mean[2]) * (dist[2] - mean[2]);
-    }
-    variance /= dist_buffer.size();
-    
-    // Focus more on the most recent changes - use smaller sections
-    // This gives even greater emphasis to very recent changes
-    size_t quarter_size = dist_buffer.size() / 4;
-    size_t very_recent_start = dist_buffer.size() - quarter_size;
-    size_t recent_start = dist_buffer.size() - quarter_size * 2;
-    
-    Vector3d very_recent_mean = Vector3d::Zero();
-    Vector3d recent_mean = Vector3d::Zero();
-    Vector3d older_mean = Vector3d::Zero();
-    
-    // Calculate means for each section
-    for (size_t i = 0; i < quarter_size && i < dist_buffer.size(); i++) {
-        if (i + very_recent_start < dist_buffer.size()) {
-            very_recent_mean += dist_buffer[i + very_recent_start];
+bool WAMV_MPC::isAboveBoundaryLine(const Vector2d& point) {
+    // Upper boundary line: [-580, 258], [-600, 248]
+    // Avoid area: y > line
+    double m = (248 - 258) / (-600 - (-580));  // slope = 0.5
+    double b = 258 - m * (-580);               // y-intercept
+    double line_y = m * point.x() + b;
+    return point.y() > line_y;
+}
+
+bool WAMV_MPC::isBelowBoundaryLine(const Vector2d& point) {
+    // Lower boundary line: [-584, 184], [-593, 183]
+    // Avoid area: y < line
+    double m = (183 - 184) / (-593 - (-584));  // slope = 1/9
+    double b = 184 - m * (-584);               // y-intercept
+    double line_y = m * point.x() + b;
+    return point.y() < line_y;
+}
+
+bool WAMV_MPC::isPathObstacleFree(const Vector2d& start, const Vector2d& end) {
+    // Check intersection with dock areas
+    for (const auto& dock : dock_areas) {
+        if (lineIntersectsPolygon(start, end, dock)) {
+            return false;
         }
-        if (i + recent_start < very_recent_start) {
-            recent_mean += dist_buffer[i + recent_start];
-        }
-        older_mean += dist_buffer[i];
-    }
-    very_recent_mean /= std::min(quarter_size, dist_buffer.size() - very_recent_start);
-    recent_mean /= std::min(quarter_size, very_recent_start - recent_start);
-    older_mean /= std::min(quarter_size, dist_buffer.size());
-    
-    // Calculate rate of change between very_recent and recent
-    double wpsi_rate = 0.0;
-    if (quarter_size > 0) {
-        wpsi_rate = (very_recent_mean[2] - recent_mean[2]) / quarter_size;
     }
     
-    // Calculate acceleration (change in rate)
-    double wpsi_accel = 0.0;
-    double older_wpsi_rate = 0.0;
-    if (quarter_size > 0) {
-        older_wpsi_rate = (recent_mean[2] - older_mean[2]) / quarter_size;
-        wpsi_accel = wpsi_rate - older_wpsi_rate;
-    }
-    
-    // Enhanced criteria for pattern change detection with heightened sensitivity
-    bool significant_pattern_change = false;
-    
-    // More sensitive detection using both rate and acceleration
-    double very_recent_vs_recent = std::abs(very_recent_mean[2] - recent_mean[2]);
-    double recent_vs_older = std::abs(recent_mean[2] - older_mean[2]);
-    
-    // Detect even smaller changes in very recent data
-    if (very_recent_vs_recent > wpsi_threshold * 0.4 ||  // Lower threshold for faster detection
-        std::abs(wpsi_accel) > 0.1 ||                   // Detect changes in acceleration
-        very_recent_vs_recent > recent_vs_older * 1.3) { // Look for any change in pattern
-        significant_pattern_change = true;
-    }
-    
-    // Check if we're in a steady state (consistent pattern)
-    bool steady_state = std::abs(wpsi_accel) < 0.05 && 
-                       very_recent_vs_recent < wpsi_threshold * 0.2 &&
-                       variance[2] < 0.8;
-    
-    // Determine if thrust commands have changed - only look at last 3 commands
-    static double prev_Tp_sum = 0, prev_Ts_sum = 0;
-    double current_Tp_sum = 0, current_Ts_sum = 0;
-    
-    // Use fewer commands for faster response
-    size_t cmd_window = std::min(size_t(3), command_history.size());
-    for (size_t i = 0; i < cmd_window; i++) {
-        current_Tp_sum += command_history[command_history.size() - 1 - i][0];
-        current_Ts_sum += command_history[command_history.size() - 1 - i][1];
-    }
-    current_Tp_sum /= cmd_window;
-    current_Ts_sum /= cmd_window;
-    
-    // Calculate change in thrust commands
-    double Tp_change = std::abs(current_Tp_sum - prev_Tp_sum);
-    double Ts_change = std::abs(current_Ts_sum - prev_Ts_sum);
-    bool thrust_unchanged = (Tp_change < 15.0) && (Ts_change < 15.0); // Slightly more lenient
-    
-    // Update for next time
-    prev_Tp_sum = current_Tp_sum;
-    prev_Ts_sum = current_Ts_sum;
-    
-    // Check for immediate spikes in wpsi as early warning signs
-    bool wpsi_spike = false;
-    if (dist_buffer.size() >= 3) {
-        double latest_wpsi = dist_buffer.back()[2];
-        double prev_wpsi = dist_buffer[dist_buffer.size()-2][2];
-        double rate_change = std::abs(latest_wpsi - prev_wpsi);
+    // Check boundary line violations
+    // Sample points along the path
+    int num_samples = 10;
+    for (int i = 0; i <= num_samples; i++) {
+        double t = static_cast<double>(i) / num_samples;
+        Vector2d sample_point = start + t * (end - start);
         
-        if (rate_change > wpsi_threshold * 0.3) {
-            wpsi_spike = true;
+        if (isAboveBoundaryLine(sample_point) || isBelowBoundaryLine(sample_point)) {
+            return false;
         }
     }
     
-    // Assemble the feature vector with improved pattern change detection
-    features[0] = esti_x[6];  // Current w_x
-    features[1] = esti_x[7];  // Current w_y
-    features[2] = esti_x[8];  // Current w_psi
-    features[3] = very_recent_mean[2]; // Very recent mean of wpsi
-    features[4] = recent_mean[2];     // Recent mean of wpsi
-    features[5] = older_mean[2];      // Older mean of wpsi
-    features[6] = significant_pattern_change ? 1.0 : 0.0;  // Pattern change in w_psi
-    features[7] = wpsi_accel;         // Acceleration in wpsi
-    features[8] = steady_state ? 1.0 : 0.0;  // Steady pattern indicator
+    return true;
+}
+
+double WAMV_MPC::calculateEnvironmentalAlignment(const Vector2d& path_direction) {
+    // Get current environmental forces
+    Vector3d env_forces(esti_x[6], esti_x[7], esti_x[8]);
+    Vector2d env_force_2d(env_forces.x(), env_forces.y());
     
-    // Add features related to the relationship between disturbance and thrust
-    if (fault_model.feature_dim >= 12) {
-        features[9] = thrust_unchanged ? 1.0 : 0.0;  // Whether thrust commands are stable
-        features[10] = wpsi_spike ? 1.0 : 0.0;       // Early warning indicator
-        features[11] = Ts.data - Tp.data;            // Thrust differential
+    // Handle zero force case
+    if (env_force_2d.norm() < 0.1) {
+        return 0.0;  // Neutral alignment
     }
     
-    // Debug output occasionally
-    static int debug_counter = 0;
-    if (debug_counter++ % 50 == 0) {
+    // Calculate alignment using dot product (cosine of angle)
+    Vector2d normalized_path = path_direction.normalized();
+    Vector2d normalized_env = env_force_2d.normalized();
+    
+    double alignment = normalized_path.dot(normalized_env);
+    
+    // Consider yaw moment assistance as well
+    double yaw_assistance = 0.0;
+    if (std::abs(env_forces.z()) > 0.1) {
+        // If we need to turn and environmental yaw moment helps
+        double current_heading = local_pos.psi;
+        double desired_heading = atan2(path_direction.y(), path_direction.x());
+        double heading_error = desired_heading - current_heading;
+        
+        // Normalize heading error to [-pi, pi]
+        while (heading_error > M_PI) heading_error -= 2.0 * M_PI;
+        while (heading_error < -M_PI) heading_error += 2.0 * M_PI;
+        
+        // Check if environmental yaw moment helps reduce heading error
+        if (heading_error * env_forces.z() > 0) {
+            yaw_assistance = 0.2;  // Bonus for yaw assistance
+        }
+    }
+    
+    return std::max(-1.0, std::min(1.0, alignment + yaw_assistance));
+}
+
+void WAMV_MPC::fastPlanning() {
+    // Reset current plan
+    current_plan.is_valid = false;
+    current_plan.feasibility_score = -999.0;
+    current_plan.selected_harbor_zone = -1;
+    
+    Vector2d current_position(local_pos.x, local_pos.y);
+    double current_heading = local_pos.psi;
+    
+    // Evaluate each harbor zone
+    for (int zone_idx = 0; zone_idx < 3; zone_idx++) {
+        const HarborZone& zone = harbor_zones[zone_idx];
+        
+        // Calculate path to zone center
+        Vector2d path_vector = zone.center - current_position;
+        double distance = path_vector.norm();
+        
+        // Skip if zone is too close (already inside)
+        if (distance < 5.0) {
+            continue;
+        }
+        
+        Vector2d path_direction = path_vector.normalized();
+        double desired_heading = atan2(path_direction.y(), path_direction.x());
+        double heading_change = std::abs(desired_heading - current_heading);
+        
+        // Normalize heading change to [0, pi]
+        if (heading_change > M_PI) {
+            heading_change = 2.0 * M_PI - heading_change;
+        }
+        
+        // Check if path is obstacle-free
+        bool obstacle_free = isPathObstacleFree(current_position, zone.center);
+        
+        // Calculate environmental alignment
+        double env_alignment = calculateEnvironmentalAlignment(path_direction);
+        
+        // Calculate feasibility score
+        double score = 0.0;
+        
+        // Distance penalty (closer is better)
+        score += 1000.0 / (distance + 10.0);  // Max ~100 points
+        
+        // Environmental assistance bonus
+        score += env_alignment * 50.0;  // ±50 points
+        
+        // Heading change penalty
+        score -= heading_change * 30.0 / M_PI;  // 0-30 point penalty
+        
+        // Obstacle bonus/penalty
+        if (obstacle_free) {
+            score += 100.0;  // Major bonus for clear path
+        } else {
+            score -= 200.0;  // Major penalty for blocked path
+            continue;  // Skip blocked paths
+        }
+        
+        // Zone preference (middle zones might be better)
+        if (zone_idx == 1) score += 10.0;  // Slight preference for middle zone
+        
+        // Update current_plan if this is the best option so far
+        if (score > current_plan.feasibility_score) {
+            current_plan.selected_harbor_zone = zone_idx;
+            current_plan.target_point = zone.center;
+            current_plan.path_distance = distance;
+            current_plan.required_heading_change = heading_change;
+            current_plan.environmental_alignment = env_alignment;
+            current_plan.obstacle_free = obstacle_free;
+            current_plan.feasibility_score = score;
+            current_plan.is_valid = true;
+        }
+    }
+    
+    // Log planning result
+    if (current_plan.is_valid) {
         RCLCPP_INFO(this->get_logger(), 
-            "Pattern: very_recent_wpsi=%.3f, recent_wpsi=%.3f, wpsi_accel=%.3f, "
-            "pattern_change=%d, steady=%d, thrust_unchanged=%d, spike=%d",
-            very_recent_mean[2], recent_mean[2], wpsi_accel,
-            significant_pattern_change, steady_state, thrust_unchanged, wpsi_spike);
+                   "Planning: Zone %d, Distance %.1f, EnvAlign %.2f, Score %.1f",
+                   current_plan.selected_harbor_zone, current_plan.path_distance, 
+                   current_plan.environmental_alignment, current_plan.feasibility_score);
+    } else {
+        RCLCPP_WARN(this->get_logger(), "No feasible path to any harbor zone found!");
     }
 }
 
-// Detect faults based on extracted features
-bool WAMV_MPC::detectFault(const VectorXd& features, int& fault_type, std::vector<double>& fault_confidences) {
-    // Skip detection during warmup period when EKF is still stabilizing
-    if (iteration_count < warmup_iterations) {
-        fault_type = NO_FAULT;
-        fault_confidences.resize(3, 0.0);
-        fault_confidences[NO_FAULT] = 0.9;
-        fault_confidences[LEFT_THRUST_FAILURE] = 0.05;
-        fault_confidences[RIGHT_THRUST_FAILURE] = 0.05;
+bool WAMV_MPC::needsReplanning() {
+    static int previous_fault_type = NO_FAULT;
+    static Vector3d previous_env_direction(0, 0, 0);
+    
+    double current_time = rclcpp::Clock(RCL_SYSTEM_TIME).now().seconds() - start_time;
+    
+    // Always replan if no valid plan exists
+    if (!current_plan.is_valid) {
+        return true;
+    }
+    
+    // Check minimum replan interval
+    if (current_time - last_replan_time < MIN_REPLAN_INTERVAL) {
         return false;
     }
-
-    // Initialize history buffers for tracking trend
-    static std::deque<double> wpsi_history;
-    static std::deque<double> wx_history;
-    static std::deque<double> wy_history;
     
-    // Add current values to history
-    double wx = esti_x[6];
-    double wy = esti_x[7];
-    double wpsi = esti_x[8];
-    
-    wx_history.push_back(wx);
-    wy_history.push_back(wy);
-    wpsi_history.push_back(wpsi);
-    
-    // Keep history to a reasonable size
-    const size_t MAX_HISTORY = 10;
-    if (wx_history.size() > MAX_HISTORY) {
-        wx_history.pop_front();
-        wy_history.pop_front();
-        wpsi_history.pop_front();
+    // Check for fault status change
+    if (current_fault_type != previous_fault_type) {
+        previous_fault_type = current_fault_type;
+        RCLCPP_INFO(this->get_logger(), "Replanning due to fault status change");
+        return true;
     }
     
-    // Calculate recent trends (for last 3 points)
-    double wpsi_trend1 = 0;
-    double wpsi_trend2 = 0;
-    
-    // Need at least 4 points for two sequential trends
-    if (wpsi_history.size() >= 4) {
-        // First trend (previous 3 points)
-        wpsi_trend1 = wpsi_history[wpsi_history.size() - 2] - wpsi_history[wpsi_history.size() - 4];
+    // Check for significant environmental force change
+    Vector3d current_env_force(esti_x[6], esti_x[7], esti_x[8]);
+    if (current_env_force.norm() > 1.0 && previous_env_direction.norm() > 1.0) {
+        Vector3d current_dir = current_env_force.normalized();
+        Vector3d prev_dir = previous_env_direction.normalized();
+        double angle_change = acos(std::max(-1.0, std::min(1.0, current_dir.dot(prev_dir))));
         
-        // Second trend (most recent 3 points)
-        wpsi_trend2 = wpsi_history[wpsi_history.size() - 1] - wpsi_history[wpsi_history.size() - 3];
-    }
-    
-    // Check for trend reversals (sign change in consecutive trends)
-    bool wpsi_turning_point = (wpsi_trend1 * wpsi_trend2 < 0) && 
-                             (std::abs(wpsi_trend1) > 0.1) && 
-                             (std::abs(wpsi_trend2) > 0.1);
-    
-    // Calculate current rate of change in wpsi
-    double current_wpsi_slope = 0;
-    if (wpsi_history.size() >= 3) {
-        current_wpsi_slope = wpsi_history.back() - wpsi_history[wpsi_history.size() - 3];
-    }
-    
-    // Log buffer contents for debugging
-    std::string wpsi_buffer_str = "wpsi_buffer: ";
-    for (double val : wpsi_history) {
-        wpsi_buffer_str += std::to_string(val) + " ";
-    }
-    RCLCPP_INFO(this->get_logger(), "%s", wpsi_buffer_str.c_str());
-    
-    // Log turning point and trend information
-    RCLCPP_INFO(this->get_logger(), 
-        "Trends: wpsi_trend1=%.3f, wpsi_trend2=%.3f, slope=%.3f, turning_point=%s",
-        wpsi_trend1, wpsi_trend2, current_wpsi_slope, 
-        wpsi_turning_point ? "YES" : "NO");
-    
-    // Initialize fault confidences to default values
-    fault_confidences.resize(3, 0.0);
-    fault_confidences[NO_FAULT] = 0.8;
-    fault_confidences[LEFT_THRUST_FAILURE] = 0.1;
-    fault_confidences[RIGHT_THRUST_FAILURE] = 0.1;
-    
-    // ===== SIMPLE TREND-BASED FAULT DETECTION =====
-    
-    // Also check for abrupt change in slope direction
-    bool significant_slope_change = false;
-    static double prev_slope = 0;
-    
-    if (std::abs(current_wpsi_slope) > 0.1) {
-        // If previous slope had opposite sign and significant magnitude
-        if (prev_slope * current_wpsi_slope < 0 && std::abs(prev_slope) > 0.1) {
-            significant_slope_change = true;
-            RCLCPP_INFO(this->get_logger(), "Significant slope change detected: %.3f -> %.3f",
-                       prev_slope, current_wpsi_slope);
-        }
-        // Update previous slope
-        prev_slope = current_wpsi_slope;
-    }
-    
-    // Raw fault detection based on turning point or significant slope change
-    bool raw_fault_detected = wpsi_turning_point || significant_slope_change;
-    int raw_fault_type = NO_FAULT;
-    
-    if (raw_fault_detected) {
-        // Analyze current configuration
-        bool is_forward_motion = (Tp.data == Ts.data);
-        bool is_right_turn = (Tp.data > Ts.data);
-        bool is_left_turn = (Tp.data < Ts.data);
-        
-        // Determine fault type based on trend direction after the turning point
-        if (is_forward_motion) {
-            // For forward motion: slope direction after turning point indicates fault type
-            raw_fault_type = (current_wpsi_slope > 0) ? LEFT_THRUST_FAILURE : RIGHT_THRUST_FAILURE;
-        }
-        else if (is_right_turn) {
-            // For right turn: change from negative to positive slope -> RIGHT thruster failure
-            //                  change from positive to negative slope -> LEFT thruster failure
-            raw_fault_type = (current_wpsi_slope > 0) ? RIGHT_THRUST_FAILURE : LEFT_THRUST_FAILURE;
-        }
-        else if (is_left_turn) {
-            // For left turn: change from negative to positive slope -> LEFT thruster failure
-            //                 change from positive to negative slope -> RIGHT thruster failure
-            raw_fault_type = (current_wpsi_slope > 0) ? LEFT_THRUST_FAILURE : RIGHT_THRUST_FAILURE;
-        }
-        else {
-            // For complex motion: use slope direction
-            raw_fault_type = (current_wpsi_slope > 0) ? LEFT_THRUST_FAILURE : RIGHT_THRUST_FAILURE;
-        }
-        
-        RCLCPP_INFO(this->get_logger(), 
-            "FAULT DETECTED - Slope: %.3f, Raw fault type: %d",
-            current_wpsi_slope, raw_fault_type);
-    }
-    
-    // ===== FAULT STATE FILTERING =====
-    // Tracking variables (static to persist between calls)
-    static int consecutive_fault_detections = 0;
-    static int consecutive_normal_detections = 0;
-    static int last_detected_fault_type = NO_FAULT;
-    static bool fault_state_active = false;
-    static bool use_ml_confidences = false;  // NEW: Separate flag for confidence mode
-
-    // Fault confirmation parameters
-    const int FAULT_CONFIRMATION_COUNT = 1;  // Only need 1 detection to confirm
-    const int NORMAL_CONFIRMATION_COUNT = 5; // Need 5 consecutive normals to clear
-
-    // Update state counters
-    if (raw_fault_detected) {
-        if (raw_fault_type == last_detected_fault_type) {
-            consecutive_fault_detections++;
-        } else {
-            consecutive_fault_detections = 1;
-            last_detected_fault_type = raw_fault_type;
-        }
-        consecutive_normal_detections = 0;
-        use_ml_confidences = true;  // Switch to ML mode when fault detected
-    } else {
-        // Only increment normal detections if we're not currently in a fault state
-        // OR if the disturbance values have actually returned to normal levels
-        bool truly_normal = (std::abs(esti_x[6]) < wx_threshold/2) && 
-                        (std::abs(esti_x[7]) < wy_threshold/2) && 
-                        (std::abs(esti_x[8]) < wpsi_threshold/2);
-        
-        if (!fault_state_active || truly_normal) {
-            consecutive_normal_detections++;
-        } else {
-            // Reset normal counter if disturbances are still high during fault state
-            consecutive_normal_detections = 0;
-        }
-        
-        if (consecutive_normal_detections > 100) consecutive_normal_detections = 100; // Prevent overflow
-        
-        // IMPORTANT: Don't reset use_ml_confidences here!
-        // Only reset it when fault is completely cleared (in the state machine below)
-    }
-
-    // ALWAYS calculate ML confidence values (regardless of fault state)
-    VectorXd scores = VectorXd::Zero(3);
-    for (int i = 0; i < 3; i++) {
-        double logit = fault_model.weights.col(i).dot(features) + fault_model.bias;
-        scores[i] = 1.0 / (1.0 + exp(-logit));
-    }
-
-    // Normalize to ensure sum = 1.0
-    double sum = scores.sum();
-    if (sum > 0) {
-        fault_confidences[NO_FAULT] = scores[0] / sum;
-        fault_confidences[LEFT_THRUST_FAILURE] = scores[1] / sum;
-        fault_confidences[RIGHT_THRUST_FAILURE] = scores[2] / sum;
-    } else {
-        // Fallback values if ML model fails
-        fault_confidences[NO_FAULT] = 0.8;
-        fault_confidences[LEFT_THRUST_FAILURE] = 0.1;
-        fault_confidences[RIGHT_THRUST_FAILURE] = 0.1;
-    }
-
-    // Decide which confidences to use based on our separate flag
-    RCLCPP_INFO(this->get_logger(), 
-        "BEFORE confidence decision: use_ml_confidences=%s, fault_state_active=%s, raw_fault_detected=%s", 
-        use_ml_confidences ? "true" : "false", 
-        fault_state_active ? "true" : "false",
-        raw_fault_detected ? "true" : "false");
-
-    if (!use_ml_confidences) {
-        // Normal operation - use default values
-        fault_confidences[NO_FAULT] = 0.8;           // 80%
-        fault_confidences[LEFT_THRUST_FAILURE] = 0.1; // 10%
-        fault_confidences[RIGHT_THRUST_FAILURE] = 0.1; // 10%
-        
-        RCLCPP_INFO(this->get_logger(), "SETTING DEFAULT confidences: 80/10/10");
-    } else {
-        // Use ML confidences, but ensure reasonable fault-specific values
-        RCLCPP_INFO(this->get_logger(), 
-            "KEEPING ML confidences: NO_FAULT=%.1f, LEFT=%.1f, RIGHT=%.1f", 
-            fault_confidences[NO_FAULT]*100, fault_confidences[LEFT_THRUST_FAILURE]*100, 
-            fault_confidences[RIGHT_THRUST_FAILURE]*100);
-            
-        if (fault_state_active && last_detected_fault_type == LEFT_THRUST_FAILURE) {
-            if (fault_confidences[LEFT_THRUST_FAILURE] < 0.5) {
-                fault_confidences[LEFT_THRUST_FAILURE] = 0.7;
-                fault_confidences[RIGHT_THRUST_FAILURE] = 0.15;
-                fault_confidences[NO_FAULT] = 0.15;
-                RCLCPP_INFO(this->get_logger(), "BOOSTED LEFT fault confidence to 70/15/15");
-            }
-        } else if (fault_state_active && last_detected_fault_type == RIGHT_THRUST_FAILURE) {
-            if (fault_confidences[RIGHT_THRUST_FAILURE] < 0.5) {
-                fault_confidences[RIGHT_THRUST_FAILURE] = 0.7;
-                fault_confidences[LEFT_THRUST_FAILURE] = 0.15;
-                fault_confidences[NO_FAULT] = 0.15;
-                RCLCPP_INFO(this->get_logger(), "BOOSTED RIGHT fault confidence to 15/70/15");
-            }
-        }
-    }
-
-    RCLCPP_INFO(this->get_logger(), 
-        "FINAL confidences before state machine: NO_FAULT=%.1f, LEFT=%.1f, RIGHT=%.1f", 
-        fault_confidences[NO_FAULT]*100, fault_confidences[LEFT_THRUST_FAILURE]*100, 
-        fault_confidences[RIGHT_THRUST_FAILURE]*100);
-
-    // State machine for fault status
-    if (!fault_state_active) {
-        // Currently in normal state
-        if (consecutive_fault_detections >= FAULT_CONFIRMATION_COUNT) {
-            // Confirm fault
-            fault_state_active = true;
-            fault_type = last_detected_fault_type;
-            
-            // Use ML confidences for fault state
-            
-            confidence_level.header.stamp = rclcpp::Clock().now();
-            confidence_level.twist.linear.x = fault_confidences[LEFT_THRUST_FAILURE];
-            confidence_level.twist.linear.y = fault_confidences[RIGHT_THRUST_FAILURE]; 
-            confidence_level.twist.angular.x = fault_confidences[NO_FAULT];
-            confidence_pub->publish(confidence_level);
-            
-            RCLCPP_INFO(this->get_logger(), 
-                "FAULT CONFIRMED - Type: %d, Consecutive detections: %d",
-                fault_type, consecutive_fault_detections);
-                
+        if (angle_change > M_PI / 6) {  // 30 degrees
+            previous_env_direction = current_env_force;
+            RCLCPP_INFO(this->get_logger(), "Replanning due to environmental force change");
             return true;
-        } else {
-            // Stay in normal state - but still publish confidence values
-            fault_type = NO_FAULT;
-            
-            // Publish confidence values for normal operation
-            auto conf_msg = std::make_unique<std_msgs::msg::Float64MultiArray>();
-            conf_msg->data.resize(3);
-            conf_msg->data[0] = fault_confidences[NO_FAULT];
-            conf_msg->data[1] = fault_confidences[LEFT_THRUST_FAILURE];
-            conf_msg->data[2] = fault_confidences[RIGHT_THRUST_FAILURE];
-            fault_confidence_pub->publish(*conf_msg);
-            
-            return false;
         }
     } else {
-        // Currently in fault state
-        if (consecutive_normal_detections >= NORMAL_CONFIRMATION_COUNT) {
-            // Clear fault after multiple normal readings
-            fault_state_active = false;
-            fault_type = NO_FAULT;
-            use_ml_confidences = false;  // Switch back to default values
-            
-            // Don't set confidence values here - they'll be set above based on use_ml_confidences flag
-            
-            // Publish the cleared fault confidence
-            auto conf_msg = std::make_unique<std_msgs::msg::Float64MultiArray>();
-            conf_msg->data.resize(3);
-            conf_msg->data[0] = fault_confidences[NO_FAULT];
-            conf_msg->data[1] = fault_confidences[LEFT_THRUST_FAILURE];
-            conf_msg->data[2] = fault_confidences[RIGHT_THRUST_FAILURE];
-            fault_confidence_pub->publish(*conf_msg);
-            
+        previous_env_direction = current_env_force;
+    }
+    
+    // Check if approaching target (within 20m)
+    Vector2d current_pos(local_pos.x, local_pos.y);
+    double distance_to_target = (current_plan.target_point - current_pos).norm();
+    if (distance_to_target < 20.0) {
+        RCLCPP_INFO(this->get_logger(), "Replanning due to target proximity");
+        return true;
+    }
+    
+    return false;
+}
+
+void WAMV_MPC::updatePlanningAndReference() {
+    // Check if replanning is needed
+    if (needsReplanning()) {
+        fastPlanning();  // Now void function - updates current_plan directly
+        last_replan_time = rclcpp::Clock(RCL_SYSTEM_TIME).now().seconds() - start_time;
+        
+        if (current_plan.is_valid) {
+            // Update MPC reference trajectory to target point
+            // This will be used in your existing ref_cb function
             RCLCPP_INFO(this->get_logger(), 
-                "FAULT CLEARED - After %d consecutive normal readings",
-                consecutive_normal_detections);
-                
-            return false;
-        } else {
-            // Continue reporting current fault
-            fault_type = last_detected_fault_type;
-            
-            // Keep the ML-calculated confidences (don't override them)
-            // The confidences were already calculated above using the ML model
-            
-            // Publish fault confidence
-            auto conf_msg = std::make_unique<std_msgs::msg::Float64MultiArray>();
-            conf_msg->data.resize(3);
-            conf_msg->data[0] = fault_confidences[NO_FAULT];
-            conf_msg->data[1] = fault_confidences[LEFT_THRUST_FAILURE];
-            conf_msg->data[2] = fault_confidences[RIGHT_THRUST_FAILURE];
-            fault_confidence_pub->publish(*conf_msg);
-            
-            return true;
+                       "New plan: Target (%.1f, %.1f), Zone %d", 
+                       current_plan.target_point.x(), current_plan.target_point.y(),
+                       current_plan.selected_harbor_zone);
         }
     }
 }
 
-// Update the logistic regression model
-void WAMV_MPC::logisticRegressionUpdate(const VectorXd& features, int label) 
-{
-    // Store data in buffers
-    fault_model.feature_buffer.push_back(features);
-    fault_model.label_buffer.push_back(label);
+void WAMV_MPC::initializeOperationalMode() {
+    current_mode = FOLLOW_PRESET_TRAJECTORY;
+    trajectory_generation_active = false;
+    generated_line_number = 0;
+    generated_trajectory.clear();
     
-    // Ensure buffer doesn't exceed max size
-    if (fault_model.feature_buffer.size() > static_cast<size_t>(fault_model.buffer_size)) {
-        fault_model.feature_buffer.pop_front();
-        fault_model.label_buffer.pop_front();
+    RCLCPP_INFO(this->get_logger(), "Operational mode initialized: FOLLOW_PRESET_TRAJECTORY");
+}
+
+void WAMV_MPC::generateStationKeepingTrajectory() {
+    // Clear existing generated trajectory
+    generated_trajectory.clear();
+    
+    // Get current position as station keeping target
+    double target_x = local_pos.x;
+    double target_y = local_pos.y;
+    double target_psi = local_pos.psi;
+    
+    // Generate stationary trajectory (same format as your .txt file)
+    // Format: [x, y, psi, u, v, r, Tp, Ts] - 8 columns
+    int num_points = 500;  // 25 seconds at 20Hz (same as your script generates)
+    
+    for (int i = 0; i < num_points; i++) {
+        std::vector<double> waypoint(8);
+        waypoint[0] = target_x;     // x - keep current position
+        waypoint[1] = target_y;     // y - keep current position  
+        waypoint[2] = target_psi;   // psi - keep current heading
+        waypoint[3] = 0.0;          // u - zero forward velocity
+        waypoint[4] = 0.0;          // v - zero lateral velocity
+        waypoint[5] = 0.0;          // r - zero angular velocity
+        waypoint[6] = 0.0;          // Tp - let MPC determine
+        waypoint[7] = 0.0;          // Ts - let MPC determine
+        
+        generated_trajectory.push_back(waypoint);
     }
     
-    // Skip if we don't have enough data
-    if (fault_model.feature_buffer.size() < static_cast<size_t>(10)) {
+    generated_line_number = 0;
+    trajectory_generation_active = true;
+    
+    RCLCPP_INFO(this->get_logger(), 
+                "Generated station keeping trajectory at (%.2f, %.2f, %.2f)", 
+                target_x, target_y, target_psi);
+}
+
+void WAMV_MPC::generateAdaptiveReturnTrajectory() {
+    // Clear existing generated trajectory
+    generated_trajectory.clear();
+    
+    if (!current_plan.is_valid) {
+        RCLCPP_WARN(this->get_logger(), "No valid plan available for trajectory generation");
         return;
     }
     
-    // Implement stochastic gradient descent update for logistic regression
-    // This is a simplified multi-class logistic regression using one-vs-all approach
+    // Current position and target
+    Vector2d current_pos(local_pos.x, local_pos.y);
+    Vector2d target_pos = current_plan.target_point;
+    // double current_psi = local_pos.psi;
     
-    // Create one-hot encoded label
-    VectorXd one_hot = VectorXd::Zero(5);
-    one_hot[label] = 1.0;
+    // Calculate trajectory parameters
+    double total_distance = (target_pos - current_pos).norm();
+    double target_heading_bounded = atan2(target_pos.y() - current_pos.y(), 
+                                         target_pos.x() - current_pos.x());
     
-    // Calculate predictions (softmax)
-    VectorXd scores = VectorXd::Zero(5);
-    for (int i = 0; i < 5; i++) {
-        scores[i] = fault_model.weights.col(i).dot(features) + fault_model.bias;
+    // CRITICAL: Convert to continuous form to match yaw_sum
+    double target_heading_continuous = convertToContinuousPsi(target_heading_bounded, yaw_sum);
+    
+    RCLCPP_INFO(this->get_logger(), "TRAJ_GEN: target_heading_bounded=%.3f, yaw_sum=%.3f, target_heading_continuous=%.3f", 
+               target_heading_bounded, yaw_sum, target_heading_continuous);
+    
+    // Generate trajectory with same structure as your mission_traj.py
+    double sample_time = 0.05;  // 20Hz to match your script
+    double cruise_speed = 1.5;  // m/s - conservative speed for fault condition
+    double approach_speed = 0.8; // m/s - slower for final approach
+    
+    // Estimate total time needed
+    // double estimated_time = total_distance / cruise_speed + 10.0; // +10s buffer
+    // int num_points = static_cast<int>(estimated_time / sample_time);
+    
+    // Phase 1: Heading adjustment (if needed)
+    double heading_error = target_heading_continuous - yaw_sum;  // Now both are continuous!
+    // No need for angle wrapping since both are continuous
+    
+    double heading_adjust_time = std::abs(heading_error) / 0.3; // 0.3 rad/s turn rate
+    int heading_adjust_points = static_cast<int>(heading_adjust_time / sample_time);
+    
+    // Phase 2: Approach to target
+    double approach_time = total_distance / cruise_speed;
+    int approach_points = static_cast<int>(approach_time / sample_time);
+    
+    // Phase 3: Final positioning (last 20m at slow speed)
+    double final_approach_distance = std::min(20.0, total_distance * 0.3);
+    double final_approach_time = final_approach_distance / approach_speed;
+    int final_points = static_cast<int>(final_approach_time / sample_time);
+    
+    // DEBUG: Print all phase information
+    RCLCPP_INFO(this->get_logger(), "TRAJ_GEN: Phases - adjust:%d, approach:%d, final:%d, total:%d", 
+               heading_adjust_points, approach_points, final_points, 
+               heading_adjust_points + approach_points + final_points + 20);
+    
+    // Generate trajectory points
+    Vector2d current_trajectory_pos = current_pos;
+    double current_trajectory_psi = yaw_sum;  // Start from current continuous psi
+    
+    // Phase 1: Heading adjustment
+    for (int i = 0; i < heading_adjust_points; i++) {
+        std::vector<double> waypoint(8);
+        
+        double t = static_cast<double>(i) / std::max(heading_adjust_points, 1);
+        double smooth_factor = 3 * t * t - 2 * t * t * t; // Smooth S-curve
+        
+        // Gradually adjust heading - CONTINUOUS
+        current_trajectory_psi = yaw_sum + heading_error * smooth_factor;
+        
+        // Move forward during heading adjustment
+        double slow_forward = std::max(0.3, cruise_speed * 0.3 * smooth_factor);
+        current_trajectory_pos += Vector2d(slow_forward * cos(current_trajectory_psi) * sample_time,
+                                          slow_forward * sin(current_trajectory_psi) * sample_time);
+        
+        waypoint[0] = current_trajectory_pos.x();
+        waypoint[1] = current_trajectory_pos.y();
+        waypoint[2] = current_trajectory_psi;  // CONTINUOUS PSI
+        waypoint[3] = slow_forward;  // u
+        waypoint[4] = 0.0;           // v  
+        waypoint[5] = heading_error / std::max(heading_adjust_time, 0.1); // r
+        waypoint[6] = 0.0;           // Tp
+        waypoint[7] = 0.0;           // Ts
+        
+        generated_trajectory.push_back(waypoint);
     }
     
-    // Apply softmax
-    double max_score = scores.maxCoeff();
-    scores = scores.array() - max_score; // For numerical stability
-    scores = scores.array().exp();
-    double sum = scores.sum();
-    scores = scores / sum;
+    // Phase 2: Main approach
+    Vector2d direction = (target_pos - current_trajectory_pos).normalized();
     
-    // Calculate gradient and update weights
-    for (int i = 0; i < 5; i++) {
-        VectorXd gradient = features * (scores[i] - one_hot[i]);
-        fault_model.weights.col(i) -= fault_model.learning_rate * 
-                                      (gradient + fault_model.lambda * fault_model.weights.col(i));
+    for (int i = 0; i < approach_points; i++) {
+        std::vector<double> waypoint(8);
+        
+        double progress = static_cast<double>(i) / std::max(approach_points, 1);
+        double current_speed = std::max(0.5, cruise_speed);
+        
+        // Slow down as we approach target
+        if (progress > 0.7) {
+            double slowdown_factor = 1.0 - (progress - 0.7) / 0.3 * 0.6;
+            current_speed = std::max(0.3, cruise_speed * slowdown_factor);
+        }
+        
+        current_trajectory_pos += direction * current_speed * sample_time;
+        
+        waypoint[0] = current_trajectory_pos.x();
+        waypoint[1] = current_trajectory_pos.y(); 
+        waypoint[2] = target_heading_continuous;  // CONTINUOUS PSI
+        waypoint[3] = current_speed;  // u
+        waypoint[4] = 0.0;           // v
+        waypoint[5] = 0.0;           // r
+        waypoint[6] = 0.0;           // Tp
+        waypoint[7] = 0.0;           // Ts
+        
+        generated_trajectory.push_back(waypoint);
     }
     
-    // Periodically save the model
-    static int update_count = 0;
-    update_count++;
-    if (update_count % 1000 == 0) {
-        saveFaultModel("fault_model.csv");
+    // Phase 3: Final approach and positioning
+    for (int i = 0; i < final_points + 20; i++) {
+        std::vector<double> waypoint(8);
+        
+        if (i < final_points) {
+            // Still approaching
+            double remaining_dist = (target_pos - current_trajectory_pos).norm();
+            if (remaining_dist > 0.5) {
+                Vector2d final_direction = (target_pos - current_trajectory_pos).normalized();
+                current_trajectory_pos += final_direction * approach_speed * sample_time;
+            } else {
+                current_trajectory_pos = target_pos;
+            }
+            
+            waypoint[0] = current_trajectory_pos.x();
+            waypoint[1] = current_trajectory_pos.y();
+            waypoint[2] = target_heading_continuous;  // CONTINUOUS PSI
+            waypoint[3] = std::max(0.2, approach_speed * 0.5); // Minimum speed
+            waypoint[4] = 0.0;
+            waypoint[5] = 0.0;
+        } else {
+            // Final hold at target
+            waypoint[0] = target_pos.x();
+            waypoint[1] = target_pos.y();
+            waypoint[2] = target_heading_continuous;  // CONTINUOUS PSI
+            waypoint[3] = 0.1; // Small forward velocity for control authority
+            waypoint[4] = 0.0;
+            waypoint[5] = 0.0;
+        }
+        
+        waypoint[6] = 0.0; // Tp
+        waypoint[7] = 0.0; // Ts
+        
+        generated_trajectory.push_back(waypoint);
+    }
+    
+    generated_line_number = 0;
+    trajectory_generation_active = true;
+    
+    // DEBUG: Print first few trajectory points
+    if (!generated_trajectory.empty()) {
+        for (int i = 0; i < std::min(3, (int)generated_trajectory.size()); i++) {
+            const auto& pt = generated_trajectory[i];
+            RCLCPP_INFO(this->get_logger(), "TRAJ_GEN: Point[%d]: pos(%.2f,%.2f), psi=%.3f, u=%.3f, v=%.3f, r=%.3f", 
+                       i, pt[0], pt[1], pt[2], pt[3], pt[4], pt[5]);
+        }
+    }
+    
+    RCLCPP_INFO(this->get_logger(), 
+                "Generated adaptive return trajectory: %zu points, target (%.2f, %.2f), continuous_psi=%.3f",
+                generated_trajectory.size(), target_pos.x(), target_pos.y(), target_heading_continuous);
+}
+
+void WAMV_MPC::updateOperationalMode() {
+    OperationalMode previous_mode = current_mode;
+    
+    // Mode switching logic based on fault status and iteration count
+    if (iteration_count < fault_trigger) {
+        // Before fault trigger - always follow preset trajectory
+        current_mode = FOLLOW_PRESET_TRAJECTORY;
+        trajectory_generation_active = false;
+    } else {
+        // After fault trigger - switch to adaptive return mode
+        // TODO: Replace with actual mode selection algorithm
+        current_mode = ADAPTIVE_ASSISTED_RETURN;
+        
+        // Enable fast planning when switching to adaptive mode
+        if (previous_mode != ADAPTIVE_ASSISTED_RETURN) {
+            // First time switching to adaptive mode
+            fastPlanning(); // Generate initial plan
+            if (current_plan.is_valid) {
+                generateAdaptiveReturnTrajectory();
+                RCLCPP_INFO(this->get_logger(), "Switched to ADAPTIVE_ASSISTED_RETURN mode");
+            } else {
+                // Fallback to station keeping if no valid plan
+                current_mode = STATION_KEEPING;
+                generateStationKeepingTrajectory();
+                RCLCPP_INFO(this->get_logger(), "No valid plan - switched to STATION_KEEPING mode");
+            }
+        }
+    }
+    
+    // Handle mode-specific updates
+    if (current_mode == ADAPTIVE_ASSISTED_RETURN) {
+        // Update planning and regenerate trajectory if needed
+        updatePlanningAndReference();
+        
+        // Regenerate trajectory if plan changed
+        static int last_selected_zone = -1;
+        if (current_plan.is_valid && current_plan.selected_harbor_zone != last_selected_zone) {
+            generateAdaptiveReturnTrajectory();
+            last_selected_zone = current_plan.selected_harbor_zone;
+        }
     }
 }
 
-// Calculate statistics on the disturbance buffer
-Vector3d WAMV_MPC::calculateDisturbanceStats(const std::deque<Vector3d>& buffer) 
-{
-    Vector3d mean = Vector3d::Zero();
-    
-    // Calculate mean
-    for (const auto& dist : buffer) {
-        mean += dist;
-    }
-    mean /= buffer.size();
-    
-    return mean;
-}
-
-// Publish fault diagnosis results
-void WAMV_MPC::publishFaultDiagnosis(int fault_type, std::vector<double>& fault_confidences) 
-{
-    // Create a new message type for more detailed fault information
-    auto fault_msg = std::make_unique<std_msgs::msg::String>();
-    auto conf_msg = std::make_unique<std_msgs::msg::Float64MultiArray>();
-    
-    std::string fault_str;
-    
-    // Get calibrated w_psi
-    double calibrated_wpsi = getCalibrated_wpsi();
-    
-    switch (fault_type) {
-        case NO_FAULT:
-            fault_str = "NO_FAULT";
+// In ref_cb_enhanced, add safety checks:
+void WAMV_MPC::ref_cb_enhanced(int line_to_read) {
+    switch (current_mode) {
+        case FOLLOW_PRESET_TRAJECTORY:
+            ref_cb(line_to_read);
             break;
-        case LEFT_THRUST_FAILURE:
-            fault_str = "LEFT_THRUST_FAILURE";
+            
+        case STATION_KEEPING:
+        case ADAPTIVE_ASSISTED_RETURN:
+            if (trajectory_generation_active && !generated_trajectory.empty()) {
+                
+                // SAFETY CHECK: Ensure we have valid trajectory data
+                if (generated_line_number < 0 || generated_line_number >= static_cast<int>(generated_trajectory.size())) {
+                    RCLCPP_WARN(this->get_logger(), "Invalid trajectory line number %d, resetting to 0", generated_line_number);
+                    generated_line_number = 0;
+                }
+                
+                // SAFETY CHECK: Ensure trajectory points have correct size
+                if (generated_trajectory[0].size() < 8) {
+                    RCLCPP_ERROR(this->get_logger(), "Generated trajectory points have wrong size: %zu", generated_trajectory[0].size());
+                    // Fall back to station keeping
+                    for (unsigned int i = 0; i <= WAMV_N; i++) {
+                        acados_in.yref[i][0] = local_pos.x;
+                        acados_in.yref[i][1] = local_pos.y;
+                        acados_in.yref[i][2] = yaw_sum;
+                        acados_in.yref[i][3] = 0.0; // u
+                        acados_in.yref[i][4] = 0.0; // v
+                        acados_in.yref[i][5] = 0.0; // r
+                        acados_in.yref[i][6] = 0.0; // Tp
+                        acados_in.yref[i][7] = 0.0; // Ts
+                    }
+                    return;
+                }
+                
+                // Fill MPC horizon with generated trajectory
+                for (unsigned int i = 0; i <= WAMV_N; i++) {
+                    int traj_index = generated_line_number + i;
+                    
+                    if (traj_index < static_cast<int>(generated_trajectory.size())) {
+                        // Copy all 8 values safely
+                        for (unsigned int j = 0; j < WAMV_NY && j < generated_trajectory[traj_index].size(); j++) {
+                            acados_in.yref[i][j] = generated_trajectory[traj_index][j];
+                        }
+                    } else {
+                        // Use last trajectory point
+                        const auto& last_point = generated_trajectory.back();
+                        for (unsigned int j = 0; j < WAMV_NY && j < last_point.size(); j++) {
+                            acados_in.yref[i][j] = last_point[j];
+                        }
+                    }
+                }
+                
+                // Advance trajectory position
+                generated_line_number++;
+                if (generated_line_number >= static_cast<int>(generated_trajectory.size())) {
+                    generated_line_number = static_cast<int>(generated_trajectory.size()) - 1;
+                }
+                
+            } else {
+                // This fallback should work - it's essentially station keeping
+                RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000, 
+                                     "No trajectory available, using station keeping");
+                for (unsigned int i = 0; i <= WAMV_N; i++) {
+                    acados_in.yref[i][0] = local_pos.x;
+                    acados_in.yref[i][1] = local_pos.y;
+                    acados_in.yref[i][2] = yaw_sum;
+                    acados_in.yref[i][3] = 0.0;
+                    acados_in.yref[i][4] = 0.0;
+                    acados_in.yref[i][5] = 0.0;
+                    acados_in.yref[i][6] = 0.0;
+                    acados_in.yref[i][7] = 0.0;
+                }
+            }
             break;
-        case RIGHT_THRUST_FAILURE:
-            fault_str = "RIGHT_THRUST_FAILURE";
-            break;
+            
         default:
-            fault_str = "UNKNOWN_FAULT";
-    }
-    
-    // Include all confidence values in the message
-    fault_msg->data = "Fault: " + fault_str + " (Confidence: " + 
-                   std::to_string(fault_confidences[fault_type] * 100.0) + "%)";
-    
-    // Add all confidence values to the array
-    conf_msg->data.resize(3); // Only 3 fault types now
-    conf_msg->data[0] = fault_confidences[NO_FAULT];
-    conf_msg->data[1] = fault_confidences[LEFT_THRUST_FAILURE];
-    conf_msg->data[2] = fault_confidences[RIGHT_THRUST_FAILURE];
-    
-    // Publish both messages
-    fault_diagnosis_pub->publish(*fault_msg);
-    fault_confidence_pub->publish(*conf_msg);
-    
-    RCLCPP_INFO(this->get_logger(), "FAULT DIAGNOSIS: %s", fault_str.c_str());
-    RCLCPP_INFO(this->get_logger(), "Confidences - NO_FAULT: %.2f%%, LEFT: %.2f%%, RIGHT: %.2f%%",
-               fault_confidences[NO_FAULT] * 100.0,
-               fault_confidences[LEFT_THRUST_FAILURE] * 100.0,
-               fault_confidences[RIGHT_THRUST_FAILURE] * 100.0);
-               
-    // Print additional debug info to console
-    std::cout << "\033[1;36m" << "FAULT DIAGNOSIS: " << fault_str << "\033[0m" << std::endl;
-    std::cout << "\033[1;36m" << "  Confidences - NO_FAULT: " << std::fixed << std::setprecision(2) 
-              << fault_confidences[NO_FAULT] * 100.0 << "%, LEFT: " 
-              << fault_confidences[LEFT_THRUST_FAILURE] * 100.0 << "%, RIGHT: "
-              << fault_confidences[RIGHT_THRUST_FAILURE] * 100.0 << "%"
-              << "\033[0m" << std::endl;
-              
-    // Print current disturbance values and thrusts with calibrated w_psi
-    std::cout << "\033[1;36m" << "  Disturbances - w_x: " << esti_x[6] 
-              << ", w_y: " << esti_x[7] << ", raw w_psi: " << esti_x[8] 
-              << ", calibrated w_psi: " << calibrated_wpsi << "\033[0m" << std::endl;
-              
-    std::cout << "\033[1;36m" << "  Thrusts - Tp: " << Tp.data 
-              << ", Ts: " << Ts.data << "\033[0m" << std::endl;
-}
-
-// Save the fault model to a file
-void WAMV_MPC::saveFaultModel(const std::string& filename) 
-{
-    std::ofstream file(filename);
-    if (file.is_open()) {
-        // Save weights
-        for (int i = 0; i < fault_model.weights.rows(); i++) {
-            for (int j = 0; j < fault_model.weights.cols(); j++) {
-                file << fault_model.weights(i, j);
-                if (j < fault_model.weights.cols() - 1) {
-                    file << ",";
-                }
-            }
-            file << std::endl;
-        }
-        file.close();
-        RCLCPP_INFO(this->get_logger(), "Saved fault model to %s", filename.c_str());
-    } else {
-        RCLCPP_ERROR(this->get_logger(), "Failed to save fault model to %s", filename.c_str());
+            RCLCPP_ERROR(this->get_logger(), "Unknown operational mode: %d", current_mode);
+            ref_cb(line_to_read);
+            break;
     }
 }
 
-// Load the fault model from a file
-void WAMV_MPC::loadFaultModel(const std::string& filename) 
-{
-    std::ifstream file(filename);
-    if (file.is_open()) {
-        std::string line;
-        int row = 0;
-        
-        while (std::getline(file, line) && row < fault_model.weights.rows()) {
-            std::stringstream ss(line);
-            std::string cell;
-            int col = 0;
-            
-            while (std::getline(ss, cell, ',') && col < fault_model.weights.cols()) {
-                fault_model.weights(row, col) = std::stod(cell);
-                col++;
-            }
-            row++;
-        }
-        
-        file.close();
-        RCLCPP_INFO(this->get_logger(), "Loaded fault model from %s", filename.c_str());
-    } else {
-        RCLCPP_WARN(this->get_logger(), "Failed to load fault model from %s", filename.c_str());
-        throw std::runtime_error("Failed to load fault model");
+double WAMV_MPC::convertToContinuousPsi(double target_heading_bounded, double current_continuous_psi) {
+    // Find the equivalent continuous heading closest to current_continuous_psi
+    
+    // Calculate how many full rotations the vehicle has made
+    double full_rotations = floor(current_continuous_psi / (2.0 * M_PI));
+    
+    // Start with the bounded heading in the same "rotation level"
+    double continuous_target = target_heading_bounded + full_rotations * 2.0 * M_PI;
+    
+    // Check if we should be in the next or previous rotation level
+    double error1 = fabs(continuous_target - current_continuous_psi);
+    double error2 = fabs(continuous_target + 2.0 * M_PI - current_continuous_psi);
+    double error3 = fabs(continuous_target - 2.0 * M_PI - current_continuous_psi);
+    
+    if (error2 < error1 && error2 < error3) {
+        continuous_target += 2.0 * M_PI;
+    } else if (error3 < error1 && error3 < error2) {
+        continuous_target -= 2.0 * M_PI;
     }
+    
+    return continuous_target;
 }
-
-// Implement the calibration function
-void WAMV_MPC::calibrateDisturbanceModel()
-{
-    // Debug output to see current values
-    static int debug_counter = 0;
-    if (debug_counter++ % 100 == 0) {
-        std::cout << "\033[1;34m" << "Calibration Debug - wpsi_coefficient: " << wpsi_coefficient
-                 << ", raw_wpsi: " << esti_x[8]
-                 << ", thrust_diff: " << (Ts.data - Tp.data)
-                 << ", expected_wpsi: " << ((Ts.data - Tp.data) * wpsi_coefficient)
-                 << ", calibrated_wpsi: " << getCalibrated_wpsi()
-                 << "\033[0m" << std::endl;
-    }
-    
-    // Skip calibration if disabled
-    if (!calibration_enabled) {
-        return;
-    }
-    
-    // Only run calibration every 10 iterations
-    calibration_counter++;
-    if (calibration_counter % 10 != 0) {
-        return;
-    }
-    
-    // Only collect data during stable operation with no faults
-    static std::deque<Vector2d> command_history;
-    Vector2d current_command(Tp.data, Ts.data);
-    command_history.push_back(current_command);
-    if (command_history.size() > 50) {
-        command_history.pop_front();
-    }
-    
-    // Check if commands have been stable for a reasonable period
-    bool commands_stable = true;
-    if (command_history.size() > 20) {
-        Vector2d first_cmd = command_history[command_history.size() - 20];
-        for (size_t i = command_history.size() - 19; i < command_history.size(); i++) {
-            if (std::abs(command_history[i][0] - first_cmd[0]) > 10.0 || 
-                std::abs(command_history[i][1] - first_cmd[1]) > 10.0) {
-                commands_stable = false;
-                break;
-            }
-        }
-    } else {
-        commands_stable = false;
-    }
-    
-    // Only collect data during stable operation with no faults and sufficient thrust
-    if (!fault_detected && commands_stable && 
-        Tp.data > 30.0 && Ts.data > 30.0 && 
-        std::abs(esti_x[8]) > 1.0) {
-        
-        double thrust_diff = Ts.data - Tp.data;
-        double current_wpsi = esti_x[8];
-        
-        // Add the data point to our calibration dataset
-        calibration_data.push_back(std::make_pair(thrust_diff, current_wpsi));
-        
-        // Limit calibration dataset size
-        if (calibration_data.size() > 1000) {
-            calibration_data.erase(calibration_data.begin());
-        }
-        
-        // Only update model if we have enough data points
-        if (calibration_data.size() > 50) {
-            // Perform linear regression to find the best relationship
-            // between thrust_diff and wpsi using least squares method
-            double sum_x = 0.0, sum_y = 0.0, sum_xy = 0.0, sum_xx = 0.0;
-            size_t n = calibration_data.size();
-            
-            for (const auto& point : calibration_data) {
-                double x = point.first;   // thrust_diff
-                double y = point.second;  // wpsi
-                
-                sum_x += x;
-                sum_y += y;
-                sum_xy += x * y;
-                sum_xx += x * x;
-            }
-            
-            // Calculate the slope (coefficient)
-            if (std::abs(n * sum_xx - sum_x * sum_x) > 1e-6) {  // Avoid division by zero
-                double new_coefficient = (n * sum_xy - sum_x * sum_y) / (n * sum_xx - sum_x * sum_x);
-                
-                // Smooth the update to avoid rapid changes
-                double alpha = 0.1;  // Smoothing factor
-                wpsi_coefficient = alpha * new_coefficient + (1.0 - alpha) * wpsi_coefficient;
-                
-                // Apply bounds to avoid unreasonable values
-                wpsi_coefficient = std::max(-0.2, std::min(0.2, wpsi_coefficient));
-                
-                // Publish the updated coefficient
-                auto msg = std::make_unique<std_msgs::msg::Float64>();
-                msg->data = wpsi_coefficient;
-                wpsi_coefficient_pub->publish(*msg);
-                
-                // Log the update occasionally
-                static int log_counter = 0;
-                if (log_counter++ % 50 == 0) {
-                    RCLCPP_INFO(this->get_logger(), "Updated wpsi_coefficient: %.5f", wpsi_coefficient);
-                }
-            }
-        }
-    }
-}
-
-double WAMV_MPC::getCalibrated_wpsi() const {
-    // Current w_psi value
-    double raw_wpsi = esti_x[8];
-    
-    // Calculate thrust differential - use actual published values
-    double thrust_diff = Ts.data - Tp.data;
-    
-    // Expected w_psi based on thrust differential
-    double expected_wpsi = thrust_diff * wpsi_coefficient;
-    
-    // Calibrated value: actual minus expected
-    double calibrated_wpsi = raw_wpsi - expected_wpsi;
-    
-    return calibrated_wpsi;
-}
-
-// WAMV_MPC::ThrusterConfiguration WAMV_MPC::analyzeThrusterConfiguration(
-//     double tp, double ts, double delta_p, double delta_s) 
-// {
-//     ThrusterConfiguration config;
-//     config.type = ThrusterConfiguration::UNKNOWN;
-//     config.expected_wpsi = 0.0;
-//     config.turn_direction = 0.0;
-    
-//     // Classification based on thruster angles
-//     bool is_forward_motion = (std::abs(delta_p) < 0.2 && std::abs(delta_s) < 0.2);
-//     bool is_right_turn = (delta_p > 1.0 && delta_s > 1.0);
-//     bool is_left_turn = (delta_p < -1.0 && delta_s < -1.0);
-    
-//     // Calculate thrust differential
-//     double thrust_diff = ts - tp;
-    
-//     // Calculate approximate forces and moments
-//     if (is_forward_motion) {
-//         // Forward motion classification
-//         config.type = ThrusterConfiguration::FORWARD;
-        
-//         // In forward motion, yaw moment is primarily from thrust differential
-//         config.expected_wpsi = thrust_diff * wpsi_coefficient;
-        
-//         // Set minimal turn direction indicator
-//         config.turn_direction = (thrust_diff > 0) ? 0.1 : -0.1;
-        
-//         // For nearly identical thrusts, expect minimal yaw
-//         if (std::abs(thrust_diff) < 10.0) {
-//             config.expected_wpsi = 0.0;
-//             config.turn_direction = 0.0;
-//         }
-//     }
-//     else if (is_right_turn) {
-//         // Right turn classification (both thrusters angled right)
-//         config.type = ThrusterConfiguration::TURNING;
-//         config.turn_direction = 1.0;  // Right turn
-        
-//         // For right turns, expect significant positive wpsi
-//         // This is just an approximate value - trend analysis is more important
-//         config.expected_wpsi = 15.0;  // Typical value for (200,200,1.57,1.57)
-        
-//         // Scale with thrust magnitude
-//         double avg_thrust = (std::abs(tp) + std::abs(ts)) / 2.0;
-//         if (avg_thrust > 0) {
-//             config.expected_wpsi *= (avg_thrust / 200.0);
-//         }
-//     }
-//     else if (is_left_turn) {
-//         // Left turn classification (both thrusters angled left)
-//         config.type = ThrusterConfiguration::TURNING;
-//         config.turn_direction = -1.0;  // Left turn
-        
-//         // For left turns, expect significant negative wpsi
-//         config.expected_wpsi = -15.0;  // Approximate value
-        
-//         // Scale with thrust magnitude
-//         double avg_thrust = (std::abs(tp) + std::abs(ts)) / 2.0;
-//         if (avg_thrust > 0) {
-//             config.expected_wpsi *= (avg_thrust / 200.0);
-//         }
-//     }
-//     else {
-//         // Mixed or complex configuration
-//         double angle_diff = std::abs(delta_p - delta_s);
-//         bool similar_direction = angle_diff < 0.25;
-        
-//         if (similar_direction) {
-//             // Thrusters pointing in similar direction - likely turning
-//             config.type = ThrusterConfiguration::TURNING;
-            
-//             // Calculate average angle to determine turn direction
-//             double avg_angle = (delta_p + delta_s) / 2.0;
-//             config.turn_direction = (avg_angle > 0) ? 1.0 : -1.0;
-            
-//             // Rough estimate of expected wpsi - less important for trend detection
-//             config.expected_wpsi = avg_angle * 5.0;
-//         }
-//         else {
-//             // Thrusters pointing in different directions - lateral or complex motion
-//             config.type = ThrusterConfiguration::COMPLEX;
-            
-//             // Rough moment calculation for complex configurations
-//             double port_lateral = tp * std::sin(delta_p);
-//             double stbd_lateral = ts * std::sin(delta_s);
-//             double net_lateral = port_lateral + stbd_lateral;
-            
-//             config.turn_direction = (net_lateral > 0) ? 0.5 : -0.5;
-//             config.expected_wpsi = net_lateral * 0.05;
-//         }
-//     }
-    
-//     return config;
-// }

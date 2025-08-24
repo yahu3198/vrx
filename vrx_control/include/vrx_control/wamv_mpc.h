@@ -254,7 +254,7 @@ class WAMV_MPC : public rclcpp::Node
     float yaw_error;        // yaw degree error
 
     size_t iteration_count = 0;  // Add counter
-    const size_t fault_trigger = 400;  // 20s at 20 Hz
+    const size_t fault_trigger = 200;  // 10s at 20 Hz
 
     // Buffers for low-pass filtering
     const double alpha = 0.2; // Smoothing factor (0 < alpha < 1, lower = smoother)
@@ -318,13 +318,78 @@ class WAMV_MPC : public rclcpp::Node
     double prev_wx_trend = 0.1;
     double prev_wy_trend = 0.1;
     double prev_wpsi_trend = 0.1;
+
+    float thruster_degrade_percentage = 0.1;
+    enum FaultSimulationType {
+        NO_FAULT_SIM = 0,
+        LEFT_THRUSTER_FAULT_SIM = 1,
+        RIGHT_THRUSTER_FAULT_SIM = 2
+    };
+    
+    // Define the fault type to simulate - change this to simulate different faults
+    static const int FAULT_TYPE_TO_SIMULATE = LEFT_THRUSTER_FAULT_SIM;
     
     // Constants for filtering
     const int FAULT_CONFIRMATION_COUNT = 2;  // Need this many consecutive detections
-    const int NORMAL_CONFIRMATION_COUNT = 5; // Need more to clear a fault
-
-
+    const int NORMAL_CONFIRMATION_COUNT = 5; // Need more to clear a 
     
+
+
+    struct SituationAssessment{
+        // Fault and capability assessment
+        double remaining_thrust_capability;     // 0.0 to 1.0
+        double control_authority_loss;          // 0.0 to 1.0
+        bool left_thruster_operational;
+        bool right_thruster_operational;
+        
+        // Environmental forces
+        Vector3d environmental_forces;          // [w_x, w_y, w_psi] from EKF
+        double environmental_force_magnitude;
+        
+        // Position and navigation
+        double distance_to_port;               // Euclidean distance to harbor
+        double heading_to_port;                // Required heading angle
+        Vector2d direction_to_port;            // Unit vector toward port
+        double current_heading;                // Current USV heading
+        double heading_error;                  // Difference between current and required
+        
+        // Timestamp
+        double assessment_time;                // When assessment was made
+    };
+
+    struct PlanningResult {
+        int selected_harbor_zone;        // 0, 1, or 2 (-1 if none feasible)
+        Vector2d target_point;           // Specific entry point in selected zone
+        double path_distance;            // Direct distance to target
+        double required_heading_change;  // Heading change needed (radians)
+        double environmental_alignment;  // -1 to 1, how well env forces help
+        bool obstacle_free;              // True if path avoids dock areas
+        double feasibility_score;        // Overall feasibility (higher = better)
+        bool is_valid;                   // True if any feasible path found
+    };
+    
+    struct HarborZone {
+        std::vector<Vector2d> vertices;  // Zone boundary points
+        Vector2d center;                 // Zone center point
+        double area;                     // Zone area (for reference)
+    };
+
+    enum OperationalMode {
+        FOLLOW_PRESET_TRAJECTORY = 0,    // Follow pre-read .txt file
+        STATION_KEEPING = 1,             // Stationary after fault
+        ADAPTIVE_ASSISTED_RETURN = 2     // Fast planned return to port
+    };
+
+    std::vector<HarborZone> harbor_zones;
+    std::vector<std::vector<Vector2d>> dock_areas;
+    PlanningResult current_plan;
+    double last_replan_time;
+    static constexpr double MIN_REPLAN_INTERVAL = 2.0;  // seconds
+
+    OperationalMode current_mode;
+    std::vector<std::vector<double>> generated_trajectory;  // For on-demand trajectory
+    int generated_line_number;                              // Current position in generated trajectory
+    bool trajectory_generation_active;                      // Flag for trajectory generation
 
     public:
 
@@ -345,22 +410,24 @@ class WAMV_MPC : public rclcpp::Node
     MatrixXd compute_jacobian_H(MatrixXd x);                // compute Jacobian of measurement model
     MatrixXd h_imu(MatrixXd x);
     MatrixXd compute_jacobian_H_imu(MatrixXd x);
-    void initializeFaultDiagnosis();
-    void updateFaultModel();
-    void extractFeatures(VectorXd& features);
-    bool detectFault(const VectorXd& features, int& fault_type, std::vector<double>& fault_confidences);
-    void logisticRegressionUpdate(const VectorXd& features, int label);
-    Vector3d calculateDisturbanceStats(const std::deque<Vector3d>& buffer);
-    void publishFaultDiagnosis(int fault_type, std::vector<double>& faault_confidences);
-    void saveFaultModel(const std::string& filename);
-    void loadFaultModel(const std::string& filename);
-    void calibrateDisturbanceModel();
-    double getCalibrated_wpsi() const;
-    // ThrusterConfiguration analyzeThrusterConfiguration(double tp, double ts, double delta_p, double delta_s);
-    // bool detectFaultForConfiguration(const VectorXd& features, int& fault_type, 
-    //     std::vector<double>& fault_confidences,
-    //     const ThrusterConfiguration& config);
-
+    void assessCurrentSituation();
+    // fast planning
+    void initializeHarborZones();
+    bool pointInPolygon(const Vector2d& point, const std::vector<Vector2d>& polygon);
+    bool lineIntersectsPolygon(const Vector2d& start, const Vector2d& end, const std::vector<Vector2d>& polygon);
+    bool isAboveBoundaryLine(const Vector2d& point);
+    bool isBelowBoundaryLine(const Vector2d& point);
+    bool isPathObstacleFree(const Vector2d& start, const Vector2d& end);
+    double calculateEnvironmentalAlignment(const Vector2d& path_direction);
+    void fastPlanning();
+    bool needsReplanning();
+    void updatePlanningAndReference();
+    void initializeOperationalMode();
+    void generateStationKeepingTrajectory();
+    void generateAdaptiveReturnTrajectory();
+    void updateOperationalMode();
+    void ref_cb_enhanced(int line_to_read);
+    double convertToContinuousPsi(double target_heading_bounded, double current_continuous_psi);
 };
 
 #endif
