@@ -32,15 +32,12 @@ def export_wamv_model() -> AcadosModel:
     # parameters (new added)
     Tp_pre = SX.sym('Tp_pre')
     Ts_pre = SX.sym('Ts_pre')
-    sym_p = vertcat(Tp_pre,Ts_pre)
-
-    # # Slack variables for Δu
-    # Tp_z = SX.sym('Tp_z')
-    # Ts_z = SX.sym('Ts_z')
-    # delta_p_z = SX.sym('delta_p_z')
-    # delta_s_z = SX.sym('delta_s_z')
-    # sym_z = vertcat(Tp_z,Ts_z,delta_p_z,delta_s_z)
-
+    w_x = SX.sym('w_x')             # Environmental force in x-direction (surge)
+    w_y = SX.sym('w_y')             # Environmental force in y-direction (sway)
+    w_psi = SX.sym('w_psi')         # Environmental moment in yaw direction
+    health_Tp = SX.sym('health_Tp')  # 0.0 to 1.0 (thruster effectiveness)
+    health_Ts = SX.sym('health_Ts')  # 0.0 to 1.0 (thruster effectiveness)
+    sym_p = vertcat(Tp_pre, Ts_pre, w_x, w_y, w_psi, health_Tp, health_Ts)
 
     # System parameters
     m = 180
@@ -54,10 +51,15 @@ def export_wamv_model() -> AcadosModel:
     yv, yvv = -100, -100
     nr, nrr = -300, -300
 
+    # Environmental assistance factors (can be made adaptive based on fault status)
+    env_assist_factor_x = 1.0    # How much to utilize w_x (0.0 to 1.0)
+    env_assist_factor_y = 1.0    # How much to utilize w_y (0.0 to 1.0) 
+    env_assist_factor_psi = 1.0  # How much to utilize w_psi (0.0 to 1.0)
+
     # Thrust allocation
-    Tx = Tp + Ts
-    Ty = 0
-    Mz = - B/2 * Tp + B/2 * Ts
+    Tx = health_Tp * Tp + health_Ts * Ts + env_assist_factor_x * w_x
+    Ty = 0 + env_assist_factor_y * w_y  
+    Mz = -B/2 * health_Tp * Tp + B/2 * health_Ts * Ts + env_assist_factor_psi * w_psi
 
     # Dynamics
     du = M_inv[0, 0] * (Tx + m * v * r + xu * u + xuu * fabs(u) * u)

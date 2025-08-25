@@ -37,7 +37,7 @@
 #define WAMV_NX     6
 #define WAMV_NZ     0
 #define WAMV_NU     2
-#define WAMV_NP     2
+#define WAMV_NP     7
 
 #ifdef __cplusplus
 extern "C" {

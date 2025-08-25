@@ -136,6 +136,21 @@ WAMV_MPC::WAMV_MPC()
 
     mission_completed = false;
     arrival_time = 0.0;
+
+    // Initialize environmental assistance
+    environmental_assistance.current_forces = Vector3d::Zero();
+    environmental_assistance.predicted_forces = Vector3d::Zero();
+    environmental_assistance.assistance_capability = 0.0;
+    environmental_assistance.is_reliable = false;
+    environmental_assistance.surge_assistance_factor = 0.0;  // Start with no assistance
+    environmental_assistance.sway_assistance_factor = 0.0;
+    environmental_assistance.yaw_assistance_factor = 0.0;
+
+    // Initialize adaptive weights
+    adaptive_weights.use_environmental_assistance = false;
+    adaptive_weights.environmental_weight_factor = 1.0;
+    adaptive_weights.thruster_penalty_factor = 1.0;
+    adaptive_weights.fault_compensation_gain = 0.0;
 }
 
 // subscribe pos and vel
@@ -368,11 +383,39 @@ void WAMV_MPC::solve()
     ocp_nlp_constraints_model_set(mpc_capsule->nlp_config,mpc_capsule->nlp_dims,mpc_capsule->nlp_in, 0, "lbx", acados_in.x0);
     ocp_nlp_constraints_model_set(mpc_capsule->nlp_config,mpc_capsule->nlp_dims,mpc_capsule->nlp_in, 0, "ubx", acados_in.x0);
 
+    // Update environmental assistance before MPC solve
+    updateEnvironmentalAssistance();
+    adaptMPCWeights();
+
     // set parameters
-    double u_prev[2] = {solver_param.Tp_pre, solver_param.Ts_pre};
+    // double u_prev[2] = {solver_param.Tp_pre, solver_param.Ts_pre};
+    double health_Tp = 1.0;  // Default: healthy
+    double health_Ts = 1.0;  // Default: healthy
+    
+    if (iteration_count >= fault_trigger) {
+        switch (FAULT_TYPE_TO_SIMULATE) {
+            case LEFT_THRUSTER_FAULT_SIM:
+                health_Tp = 1.0 - thruster_degrade_percentage;
+                break;
+            case RIGHT_THRUSTER_FAULT_SIM:
+                health_Ts = 1.0 - thruster_degrade_percentage;
+                break;
+        }
+    }
+
+    double params[7] = {
+        solver_param.Tp_pre, 
+        solver_param.Ts_pre,
+        esti_x[6] * environmental_assistance.surge_assistance_factor,
+        esti_x[7] * environmental_assistance.sway_assistance_factor,
+        esti_x[8] * environmental_assistance.yaw_assistance_factor,   // w_psi - environmental moment in yaw
+        health_Tp,
+        health_Ts
+    };
     for (int i = 0; i <= WAMV_N; i++) {
-        acados_param[i][0] = u_prev[0];  // Tp_prev
-        acados_param[i][1] = u_prev[1];  // Ts_prev
+        for (int j = 0; j < 7; j++) {  // CHANGE: from 2 to 5
+            acados_param[i][j] = params[j];
+        }
         wamv_acados_update_params(mpc_capsule, i, acados_param[i], WAMV_NP);
     }
 
@@ -616,11 +659,30 @@ void WAMV_MPC::publish_cin(double Tp_mpc, double Ts_mpc)
 
 void WAMV_MPC::EKF()
 {
+    // Calculate actual applied forces considering degradation
+    Vector2d actual_thrust_commands;
+    if (iteration_count >= fault_trigger) {
+        switch (FAULT_TYPE_TO_SIMULATE) {
+            case LEFT_THRUSTER_FAULT_SIM:
+                actual_thrust_commands << solver_param.Tp_pre * (1.0 - thruster_degrade_percentage), 
+                                         solver_param.Ts_pre;
+                break;
+            case RIGHT_THRUSTER_FAULT_SIM:
+                actual_thrust_commands << solver_param.Tp_pre, 
+                                         solver_param.Ts_pre * (1.0 - thruster_degrade_percentage);
+                break;
+            default:
+                actual_thrust_commands << solver_param.Tp_pre, solver_param.Ts_pre;
+        }adaptMPCWeights();
+    } else {
+        actual_thrust_commands << solver_param.Tp_pre, solver_param.Ts_pre;
+    }
     pre_ekf_pos.u = esti_x[3];
     pre_ekf_pos.v = esti_x[4];
     pre_ekf_pos.r = esti_x[5];
     // get input u and measuremnet y
-    meas_u << solver_param.Tp_pre, solver_param.Ts_pre;
+    meas_u = actual_thrust_commands;
+    tau << meas_u[0] + meas_u[1], 0, -B/2*meas_u[0]+B/2*meas_u[1];
     
     // if two fixed direction thrusters
     tau << meas_u[0] + meas_u[1], 0, -B/2*meas_u[0]+B/2*meas_u[1];
@@ -831,55 +893,6 @@ MatrixXd WAMV_MPC::compute_jacobian_H_imu(MatrixXd x) {
     return H;
 }
 
-void WAMV_MPC::assessCurrentSituation() {
-    SituationAssessment assessment;
-    
-    // Record assessment time
-    assessment.assessment_time = rclcpp::Clock(RCL_SYSTEM_TIME).now().seconds() - start_time;
-    
-    // ===== FAULT AND CAPABILITY ASSESSMENT =====
-    if (iteration_count < fault_trigger || FAULT_TYPE_TO_SIMULATE == NO_FAULT_SIM) {
-        // No fault scenario
-        assessment.remaining_thrust_capability = 1.0;
-        assessment.control_authority_loss = 0.0;
-        assessment.left_thruster_operational = true;
-        assessment.right_thruster_operational = true;
-    } else {
-        // Fault scenario - one thruster degraded
-        assessment.remaining_thrust_capability = 1.0 - thruster_degrade_percentage;
-        assessment.control_authority_loss = thruster_degrade_percentage;
-        
-        // Determine which thruster is operational
-        assessment.left_thruster_operational = (FAULT_TYPE_TO_SIMULATE != LEFT_THRUSTER_FAULT_SIM);
-        assessment.right_thruster_operational = (FAULT_TYPE_TO_SIMULATE != RIGHT_THRUSTER_FAULT_SIM);
-    }
-    
-    // ===== ENVIRONMENTAL FORCE ASSESSMENT =====
-    assessment.environmental_forces = Vector3d(esti_x[6], esti_x[7], esti_x[8]);
-    assessment.environmental_force_magnitude = assessment.environmental_forces.norm();
-    
-    // ===== POSITION AND NAVIGATION ASSESSMENT =====
-    Vector2d current_position(local_pos.x, local_pos.y);
-    Vector2d port_position(-537.0, 146.0);  // Harbor center
-    
-    Vector2d position_error = port_position - current_position;
-    assessment.distance_to_port = position_error.norm();
-    
-    if (assessment.distance_to_port > 1e-6) {
-        assessment.direction_to_port = position_error / assessment.distance_to_port;
-    } else {
-        assessment.direction_to_port = Vector2d(1.0, 0.0);  // Default direction
-    }
-    
-    assessment.heading_to_port = atan2(position_error.y(), position_error.x());
-    assessment.current_heading = local_pos.psi;
-    assessment.heading_error = assessment.heading_to_port - assessment.current_heading;
-    
-    // Normalize heading error to [-pi, pi]
-    while (assessment.heading_error > M_PI) assessment.heading_error -= 2.0 * M_PI;
-    while (assessment.heading_error < -M_PI) assessment.heading_error += 2.0 * M_PI;
-    
-}
 
 void WAMV_MPC::initializeHarborZones() {
     // Initialize harbor zones with corrected coordinates
@@ -1614,30 +1627,73 @@ double WAMV_MPC::convertToContinuousPsi(double target_heading_bounded, double cu
 
 // check if USV has arrived at harbor zone:
 bool WAMV_MPC::hasArrivedAtHarborZone() {
-    if (!current_plan.is_valid) {
-        return false;
+    Vector2d current_pos(local_pos.x, local_pos.y);
+    
+    // SUCCESS CRITERIA: USV is inside ANY harbor zone, regardless of which one was planned
+    for (size_t zone_idx = 0; zone_idx < harbor_zones.size(); zone_idx++) {
+        if (pointInPolygon(current_pos, harbor_zones[zone_idx].vertices)) {
+            RCLCPP_INFO(this->get_logger(), 
+                       "SUCCESS: USV arrived at harbor zone %zu (planned target was zone %d)!", 
+                       zone_idx, current_plan.selected_harbor_zone);
+            return true;
+        }
     }
     
-    Vector2d current_pos(local_pos.x, local_pos.y);
-    double distance_to_target = (current_plan.target_point - current_pos).norm();
-    
-    // Check if within arrival threshold
-    if (distance_to_target <= ARRIVAL_DISTANCE_THRESHOLD) {
-        // Also check if we're actually inside any harbor zone
-        for (size_t zone_idx = 0; zone_idx < harbor_zones.size(); zone_idx++) {
-            if (pointInPolygon(current_pos, harbor_zones[zone_idx].vertices)) {
-                RCLCPP_INFO(this->get_logger(), "USV is inside harbor zone %zu at distance %.2f m from target", 
-                           zone_idx, distance_to_target);
-                return true;
-            }
-        }
-        
-        // If close to target but not in any zone, still consider arrival
-        if (distance_to_target <= 10.0) {
-            RCLCPP_INFO(this->get_logger(), "USV is very close to target (%.2f m), considering arrival", distance_to_target);
+    // Fallback: Check if close to ANY zone center
+    for (size_t zone_idx = 0; zone_idx < harbor_zones.size(); zone_idx++) {
+        double distance_to_zone = (harbor_zones[zone_idx].center - current_pos).norm();
+        if (distance_to_zone <= ARRIVAL_DISTANCE_THRESHOLD) {
+            RCLCPP_INFO(this->get_logger(), 
+                       "SUCCESS: USV within %.1fm of harbor zone %zu!", 
+                       ARRIVAL_DISTANCE_THRESHOLD, zone_idx);
             return true;
         }
     }
     
     return false;
+}
+
+void WAMV_MPC::updateEnvironmentalAssistance()
+{
+    // Update current environmental forces from EKF
+    environmental_assistance.current_forces = Vector3d(esti_x[6], esti_x[7], esti_x[8]);
+    
+    // Simple reliability check
+    double force_magnitude = environmental_assistance.current_forces.norm();
+    environmental_assistance.is_reliable = (force_magnitude < 100.0) && (force_magnitude > 0.5);
+    environmental_assistance.assistance_capability = std::min(1.0, force_magnitude / 30.0);
+    
+    // FAULT-ONLY assistance (your key innovation)
+    if (iteration_count >= fault_trigger && environmental_assistance.is_reliable) {
+        // After fault - enable environmental assistance
+        environmental_assistance.surge_assistance_factor = 0.6;
+        environmental_assistance.sway_assistance_factor = 0.6;
+        environmental_assistance.yaw_assistance_factor = 0.4;
+    } else {
+        // Normal operation - NO environmental assistance
+        environmental_assistance.surge_assistance_factor = 0.0;
+        environmental_assistance.sway_assistance_factor = 0.0;
+        environmental_assistance.yaw_assistance_factor = 0.0;
+    }
+}
+
+void WAMV_MPC::adaptMPCWeights() {
+    if (iteration_count >= fault_trigger && adaptive_weights.use_environmental_assistance) {
+        // Increase psi weight during fault conditions
+        double adaptive_psi_weight = 300.0;  // Increased from original 150
+        double adaptive_u_weight = 5.0;      // Slightly increase velocity weights
+        double adaptive_v_weight = 5.0;
+        
+        // Update cost weights in ACADOS
+        double new_W_x[6] = {80, 10, adaptive_psi_weight, adaptive_u_weight, adaptive_v_weight, 5};
+        
+        // Apply new weights to all horizon points
+        for (int i = 0; i <= WAMV_N; i++) {
+            ocp_nlp_cost_model_set(mpc_capsule->nlp_config, mpc_capsule->nlp_dims, 
+                                  mpc_capsule->nlp_in, i, "W", new_W_x);
+        }
+        
+        RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 5000,
+                             "Adaptive weights active: psi_weight=%.1f", adaptive_psi_weight);
+    }
 }

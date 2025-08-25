@@ -39,7 +39,7 @@
 #define WAMV_NX     6
 #define WAMV_NZ     0
 #define WAMV_NU     2
-#define WAMV_NP     2
+#define WAMV_NP     7
 #define WAMV_NP_GLOBAL     0
 #define WAMV_NBX    0
 #define WAMV_NBX0   6

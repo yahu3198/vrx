@@ -319,7 +319,7 @@ class WAMV_MPC : public rclcpp::Node
     double prev_wy_trend = 0.1;
     double prev_wpsi_trend = 0.1;
 
-    float thruster_degrade_percentage = 0.1;
+    float thruster_degrade_percentage = 0.5;
     enum FaultSimulationType {
         NO_FAULT_SIM = 0,
         LEFT_THRUSTER_FAULT_SIM = 1,
@@ -333,29 +333,6 @@ class WAMV_MPC : public rclcpp::Node
     const int FAULT_CONFIRMATION_COUNT = 2;  // Need this many consecutive detections
     const int NORMAL_CONFIRMATION_COUNT = 5; // Need more to clear a 
     
-
-
-    struct SituationAssessment{
-        // Fault and capability assessment
-        double remaining_thrust_capability;     // 0.0 to 1.0
-        double control_authority_loss;          // 0.0 to 1.0
-        bool left_thruster_operational;
-        bool right_thruster_operational;
-        
-        // Environmental forces
-        Vector3d environmental_forces;          // [w_x, w_y, w_psi] from EKF
-        double environmental_force_magnitude;
-        
-        // Position and navigation
-        double distance_to_port;               // Euclidean distance to harbor
-        double heading_to_port;                // Required heading angle
-        Vector2d direction_to_port;            // Unit vector toward port
-        double current_heading;                // Current USV heading
-        double heading_error;                  // Difference between current and required
-        
-        // Timestamp
-        double assessment_time;                // When assessment was made
-    };
 
     struct PlanningResult {
         int selected_harbor_zone;        // 0, 1, or 2 (-1 if none feasible)
@@ -395,6 +372,28 @@ class WAMV_MPC : public rclcpp::Node
     static constexpr double ARRIVAL_DISTANCE_THRESHOLD = 15.0;  // meters
     static constexpr double ARRIVAL_CONFIRMATION_TIME = 2.0;   // seconds
 
+    // Environmental assistance structure
+    struct EnvironmentalAssistance {
+        Vector3d current_forces;          // [w_x, w_y, w_psi] from EKF
+        Vector3d predicted_forces;        // For future enhancement
+        double assistance_capability;     // 0.0 to 1.0 - how much we can rely on env forces
+        bool is_reliable;                // Environmental force quality flag
+        double surge_assistance_factor;   // α for w_x utilization (0.0 to 1.0)
+        double sway_assistance_factor;    // α for w_y utilization (0.0 to 1.0)
+        double yaw_assistance_factor;     // α for w_psi utilization (0.0 to 1.0)
+    };
+
+    // Fault-adaptive MPC configuration
+    struct AdaptiveMPCWeights {
+        bool use_environmental_assistance;
+        double environmental_weight_factor;    // Boost/reduce env assistance reliance
+        double thruster_penalty_factor;       // Increase penalty for failed thruster
+        double fault_compensation_gain;       // How aggressively to compensate with env forces
+    };
+
+    EnvironmentalAssistance environmental_assistance;
+    AdaptiveMPCWeights adaptive_weights;
+
     public:
 
     bool is_start;
@@ -414,7 +413,7 @@ class WAMV_MPC : public rclcpp::Node
     MatrixXd compute_jacobian_H(MatrixXd x);                // compute Jacobian of measurement model
     MatrixXd h_imu(MatrixXd x);
     MatrixXd compute_jacobian_H_imu(MatrixXd x);
-    void assessCurrentSituation();
+    // void assessCurrentSituation();
     // fast planning
     void initializeHarborZones();
     bool pointInPolygon(const Vector2d& point, const std::vector<Vector2d>& polygon);
@@ -433,6 +432,9 @@ class WAMV_MPC : public rclcpp::Node
     void ref_cb_enhanced(int line_to_read);
     double convertToContinuousPsi(double target_heading_bounded, double current_continuous_psi);
     bool hasArrivedAtHarborZone();
+
+    void updateEnvironmentalAssistance();
+    void adaptMPCWeights();
 };
 
 #endif
