@@ -1033,25 +1033,32 @@ bool WAMV_MPC::isPathObstacleFree(const Vector2d& start, const Vector2d& end) {
 }
 
 double WAMV_MPC::calculateEnvironmentalAlignment(const Vector2d& path_direction) {
-    // Get current environmental forces
-    Vector3d env_forces(esti_x[6], esti_x[7], esti_x[8]);
-    Vector2d env_force_2d(env_forces.x(), env_forces.y());
+    // Get current environmental forces in body frame
+    Vector3d env_forces_body(esti_x[6], esti_x[7], esti_x[8]);
+    
+    // Transform to inertial frame using current heading
+    double current_psi = local_pos.psi;  // or yaw_sum for continuous
+    Matrix2d R_body_to_inertial;
+    R_body_to_inertial << cos(current_psi), -sin(current_psi),
+                          sin(current_psi),  cos(current_psi);
+    
+    Vector2d env_force_body_2d(env_forces_body.x(), env_forces_body.y());
+    Vector2d env_force_inertial = R_body_to_inertial * env_force_body_2d;
     
     // Handle zero force case
-    if (env_force_2d.norm() < 0.1) {
+    if (env_force_inertial.norm() < 0.1) {
         return 0.0;  // Neutral alignment
     }
     
-    // Calculate alignment using dot product (cosine of angle)
+    // Now both vectors are in inertial frame
     Vector2d normalized_path = path_direction.normalized();
-    Vector2d normalized_env = env_force_2d.normalized();
+    Vector2d normalized_env = env_force_inertial.normalized();
     
     double alignment = normalized_path.dot(normalized_env);
     
-    // Consider yaw moment assistance as well
+    // Yaw moment assistance (w_psi is already scalar, no frame transformation needed)
     double yaw_assistance = 0.0;
-    if (std::abs(env_forces.z()) > 0.1) {
-        // If we need to turn and environmental yaw moment helps
+    if (std::abs(env_forces_body.z()) > 0.1) {
         double current_heading = local_pos.psi;
         double desired_heading = atan2(path_direction.y(), path_direction.x());
         double heading_error = desired_heading - current_heading;
@@ -1061,7 +1068,7 @@ double WAMV_MPC::calculateEnvironmentalAlignment(const Vector2d& path_direction)
         while (heading_error < -M_PI) heading_error += 2.0 * M_PI;
         
         // Check if environmental yaw moment helps reduce heading error
-        if (heading_error * env_forces.z() > 0) {
+        if (heading_error * env_forces_body.z() > 0) {
             yaw_assistance = 0.2;  // Bonus for yaw assistance
         }
     }
