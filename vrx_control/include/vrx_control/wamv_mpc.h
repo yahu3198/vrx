@@ -394,6 +394,51 @@ class WAMV_MPC : public rclcpp::Node
     EnvironmentalAssistance environmental_assistance;
     AdaptiveMPCWeights adaptive_weights;
 
+    // Environmental prediction variables
+    Vector3d prev_env_forces;
+    bool prev_forces_initialized;
+    double prediction_dt;
+    
+    // Validation structure - shorter horizons for better relevance
+    struct PredictionValidation {
+        std::deque<Vector3d> predicted_0_5s_body;   
+        std::deque<Vector3d> predicted_1s_body;     
+        std::deque<Vector3d> predicted_2s_body;     
+        std::deque<Vector3d> actual_forces_body;    
+        std::deque<double> prediction_headings;     
+        std::deque<double> actual_headings;         
+        std::deque<double> timestamps;              
+        
+        // Component-wise RMSE metrics
+        double rmse_0_5s_wx, rmse_0_5s_wy, rmse_0_5s_wpsi;
+        double rmse_1s_wx, rmse_1s_wy, rmse_1s_wpsi;
+        double rmse_2s_wx, rmse_2s_wy, rmse_2s_wpsi;
+        
+        // Overall RMSE for comparison
+        double rmse_0_5s_overall, rmse_1s_overall, rmse_2s_overall;
+        
+        // Component-wise MAE metrics
+        double mae_0_5s_wx, mae_0_5s_wy, mae_0_5s_wpsi;
+        double mae_1s_wx, mae_1s_wy, mae_1s_wpsi;
+        double mae_2s_wx, mae_2s_wy, mae_2s_wpsi;
+        
+        int validation_samples;
+        bool validation_ready;
+        
+        PredictionValidation() : 
+            rmse_0_5s_wx(0), rmse_0_5s_wy(0), rmse_0_5s_wpsi(0),
+            rmse_1s_wx(0), rmse_1s_wy(0), rmse_1s_wpsi(0),
+            rmse_2s_wx(0), rmse_2s_wy(0), rmse_2s_wpsi(0),
+            rmse_0_5s_overall(0), rmse_1s_overall(0), rmse_2s_overall(0),
+            mae_0_5s_wx(0), mae_0_5s_wy(0), mae_0_5s_wpsi(0),
+            mae_1s_wx(0), mae_1s_wy(0), mae_1s_wpsi(0),
+            mae_2s_wx(0), mae_2s_wy(0), mae_2s_wpsi(0),
+            validation_samples(0), validation_ready(false) {}
+    };
+    
+    PredictionValidation pred_validation;
+    static const int VALIDATION_HISTORY_SIZE = 60;  // 3 seconds at 20Hz
+
     public:
 
     bool is_start;
@@ -435,6 +480,13 @@ class WAMV_MPC : public rclcpp::Node
 
     void updateEnvironmentalAssistance();
     void adaptMPCWeights();
+
+    void initializeTrendPrediction();
+    Vector3d predictWithDecay(double prediction_time_seconds);
+    void updateValidationData();
+    void computePredictionMetrics();
+    void fillMPCHorizonWithPrediction();
+    Vector3d transformBodyToInertial(const Vector3d& forces_body, double heading);
 };
 
 #endif
