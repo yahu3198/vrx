@@ -58,6 +58,11 @@ ForceArrowItem::ForceArrowItem(double start_x, double start_y, double force_x, d
 
 void ForceArrowItem::updateForce(double start_x, double start_y, double force_x, double force_y)
 {
+    // Clear the previous drawing area before updating
+    if (scene()) {
+        scene()->update(boundingRect().translated(pos()));
+    }
+    
     setPos(start_x, start_y);
     
     // Scale force for visualization
@@ -75,6 +80,11 @@ void ForceArrowItem::updateForce(double start_x, double start_y, double force_x,
         }
     } else {
         setVisible(false);
+    }
+    
+    // Update the new drawing area
+    if (scene()) {
+        scene()->update(boundingRect().translated(pos()));
     }
 }
 
@@ -299,7 +309,7 @@ void WAMVDashboard::setupHarborMap()
     harbor_map_scene_->setSceneRect(-650, 150, 100, 150);
     
     // Add harbor zones with scaling factor for better visibility
-    double scale_factor = 5.0; // Make harbor zones 5x larger for visibility
+    double scale_factor = 10.0; // Doubled from 5.0 to make harbor zones twice as big
     harbor_zone_items_.resize(harbor_zones_.size());
     for (size_t i = 0; i < harbor_zones_.size(); ++i) {
         QPolygonF polygon;
@@ -356,8 +366,8 @@ void WAMVDashboard::setupHarborMap()
         lower_start.x(), lower_start.y(), lower_end.x(), lower_end.y(),
         QPen(QColor(255, 0, 0), 2, Qt::DashLine));
     
-    // Update scene rectangle to fit transformed coordinates  
-    harbor_map_scene_->setSceneRect(-1300, 2500, 500, 750);
+    // Update scene rectangle to fit transformed coordinates (doubled size)
+    harbor_map_scene_->setSceneRect(-2600, 5000, 1000, 1500);
     
     // Initialize USV item (will be positioned in update function)
     usv_item_ = new USVGraphicsItem(0, 0, 0);
@@ -537,17 +547,41 @@ void WAMVDashboard::handleOdomMsg(const nav_msgs::msg::Odometry::SharedPtr msg)
 
 void WAMVDashboard::handleFaultDiagnosisMsg(const std_msgs::msg::String::SharedPtr msg)
 {
-    // Parse fault diagnosis message
-    std::string message = msg->data;
-    size_t fault_pos = message.find("Fault: ");
+    // Log every message received for debugging
+    // RCLCPP_INFO(node_ptr_->get_logger(), "=== FAULT MESSAGE RECEIVED ===");
+    // RCLCPP_INFO(node_ptr_->get_logger(), "Raw message: '%s'", msg->data.c_str());
     
+    // Parse fault diagnosis message - handle different message formats
+    std::string message = msg->data;
+    std::string old_status = current_fault_status_;
+    
+    // Try multiple parsing approaches
+    size_t fault_pos = message.find("Fault: ");
     if (fault_pos != std::string::npos) {
+        // Format: "Fault: FAULT_TYPE (Confidence: XX.X%)"
         size_t fault_start = fault_pos + 7;
         size_t fault_end = message.find(" ", fault_start);
-        if (fault_end != std::string::npos) {
-            current_fault_status_ = message.substr(fault_start, fault_end - fault_start);
+        if (fault_end == std::string::npos) {
+            fault_end = message.length();
+        }
+        current_fault_status_ = message.substr(fault_start, fault_end - fault_start);
+    } else {
+        // Try simpler format - just the fault type
+        if (message.find("LEFT_THRUST_FAILURE") != std::string::npos) {
+            current_fault_status_ = "LEFT_THRUST_FAILURE";
+        } else if (message.find("RIGHT_THRUST_FAILURE") != std::string::npos) {
+            current_fault_status_ = "RIGHT_THRUST_FAILURE";
+        } else if (message.find("NO_FAULT") != std::string::npos) {
+            current_fault_status_ = "NO_FAULT";
+        } else {
+            // Use the entire message as fault status
+            current_fault_status_ = message;
         }
     }
+    
+    // RCLCPP_INFO(node_ptr_->get_logger(), "Status changed: '%s' -> '%s'", 
+    //             old_status.c_str(), current_fault_status_.c_str());
+    // RCLCPP_INFO(node_ptr_->get_logger(), "=== END FAULT MESSAGE ===");
 }
 
 void WAMVDashboard::handleOperationalModeMsg(const std_msgs::msg::String::SharedPtr msg)
@@ -606,9 +640,15 @@ void WAMVDashboard::updateDashboard()
 
 void WAMVDashboard::updateHarborMapDisplay()
 {
+    // Transform USV position to match harbor zone coordinate system
+    double scale_factor = 10.0; // Updated to match the doubled harbor zone scaling
+    double transformed_x = -usv_y_ * scale_factor;  // Apply horizontal flip
+    double transformed_y = -usv_x_ * scale_factor;
+    double transformed_heading = usv_heading_ - M_PI/2; // Adjust heading for rotation
+    
     // Update USV position and heading
     if (usv_item_) {
-        usv_item_->updatePosition(usv_x_, usv_y_, usv_heading_);
+        usv_item_->updatePosition(transformed_x, transformed_y, transformed_heading);
     }
     
     // Update environmental force arrows
@@ -617,6 +657,8 @@ void WAMVDashboard::updateHarborMapDisplay()
     // Update planning display
     updatePlanningDisplay();
 }
+
+
 
 void WAMVDashboard::updateControlPanelDisplay()
 {
@@ -671,13 +713,17 @@ void WAMVDashboard::updateControlPanelDisplay()
 void WAMVDashboard::updateEnvironmentalForces()
 {
     if (wx_arrow_ && wy_arrow_ && wpsi_arrow_) {
-        double scale_factor = 5.0;
+        double scale_factor = 10.0; // Updated to match the doubled harbor zone scaling
         double transformed_usv_x = -usv_y_ * scale_factor;  // Apply horizontal flip
         double transformed_usv_y = -usv_x_ * scale_factor;
         
+        // Clear previous arrow positions by forcing scene update
+        harbor_map_scene_->update();
+        
         // Transform environmental forces to match coordinate system
         // Apply the same transformation to force directions
-        double transformed_wx = -wy_ * 15; // Scale for visibility  
+        // Keep arrow size the same (15x scaling) as requested
+        double transformed_wx = -wy_ * 15; // Keep arrow scale unchanged
         double transformed_wy = -wx_ * 15;
         
         // Update force arrows with transformed coordinates and forces
@@ -699,7 +745,7 @@ void WAMVDashboard::updateEnvironmentalForces()
 
 void WAMVDashboard::updatePlanningDisplay()
 {
-    double scale_factor = 5.0;
+    double scale_factor = 10.0; // Updated to match the doubled harbor zone scaling
     double transformed_usv_x = -usv_y_ * scale_factor;  // Apply horizontal flip
     double transformed_usv_y = -usv_x_ * scale_factor;
     
