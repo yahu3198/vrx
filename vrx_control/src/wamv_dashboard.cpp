@@ -4,7 +4,114 @@
 #include <QHBoxLayout>
 #include <QGroupBox>
 #include <QMessageBox>
+#include <QPainter>
+#include <QBrush>
+#include <QPen>
 #include <cmath>
+
+// USVGraphicsItem implementation
+USVGraphicsItem::USVGraphicsItem(double x, double y, double heading, QGraphicsItem* parent)
+    : QGraphicsEllipseItem(-5, -5, 10, 10, parent), heading_(heading)
+{
+    setPos(x, y);
+    setBrush(QBrush(QColor(0, 150, 0))); // Green USV
+    setPen(QPen(QColor(0, 100, 0), 2));
+    
+    // Add heading line
+    heading_line_ = new QGraphicsLineItem(0, 0, 15 * cos(heading), 15 * sin(heading), this);
+    heading_line_->setPen(QPen(QColor(0, 100, 0), 3));
+}
+
+void USVGraphicsItem::updatePosition(double x, double y, double heading)
+{
+    setPos(x, y);
+    heading_ = heading;
+    
+    // Update heading line
+    heading_line_->setLine(0, 0, 15 * cos(heading), 15 * sin(heading));
+}
+
+void USVGraphicsItem::paint(QPainter* painter, const QStyleOptionGraphicsItem* option, QWidget* widget)
+{
+    Q_UNUSED(option)
+    Q_UNUSED(widget)
+    
+    painter->setBrush(QBrush(QColor(0, 150, 0)));
+    painter->setPen(QPen(QColor(0, 100, 0), 2));
+    painter->drawEllipse(boundingRect());
+}
+
+// ForceArrowItem implementation
+ForceArrowItem::ForceArrowItem(double start_x, double start_y, double force_x, double force_y, 
+                              const QString& label, QGraphicsItem* parent)
+    : QGraphicsLineItem(parent), label_(label), is_active_(false), arrow_scale_(0.5)
+{
+    updateForce(start_x, start_y, force_x, force_y);
+    
+    // Add label
+    label_item_ = new QGraphicsTextItem(label, this);
+    label_item_->setDefaultTextColor(QColor(50, 50, 50));
+    QFont font = label_item_->font();
+    font.setPointSize(8);
+    label_item_->setFont(font);
+}
+
+void ForceArrowItem::updateForce(double start_x, double start_y, double force_x, double force_y)
+{
+    setPos(start_x, start_y);
+    
+    // Scale force for visualization
+    double scaled_x = force_x * arrow_scale_;
+    double scaled_y = force_y * arrow_scale_;
+    double magnitude = sqrt(scaled_x * scaled_x + scaled_y * scaled_y);
+    
+    if (magnitude > 0.5) {
+        setLine(0, 0, scaled_x, scaled_y);
+        setVisible(true);
+        
+        // Position label at end of arrow
+        if (label_item_) {
+            label_item_->setPos(scaled_x + 5, scaled_y - 10);
+        }
+    } else {
+        setVisible(false);
+    }
+}
+
+void ForceArrowItem::setActive(bool active)
+{
+    is_active_ = active;
+    update();
+}
+
+void ForceArrowItem::paint(QPainter* painter, const QStyleOptionGraphicsItem* option, QWidget* widget)
+{
+    Q_UNUSED(option)
+    Q_UNUSED(widget)
+    
+    QPen pen;
+    if (is_active_) {
+        pen = QPen(QColor(255, 100, 0), 3); // Orange for active
+    } else {
+        pen = QPen(QColor(100, 100, 100), 2); // Gray for inactive
+    }
+    
+    painter->setPen(pen);
+    painter->drawLine(line());
+    
+    // Draw arrowhead
+    if (line().length() > 5) {
+        QPointF end = line().p2();
+        QPointF start = line().p1();
+        double angle = atan2((end.y() - start.y()), (end.x() - start.x()));
+        
+        QPointF arrowP1 = end + QPointF(sin(angle + M_PI / 3) * 8, cos(angle + M_PI / 3) * 8);
+        QPointF arrowP2 = end + QPointF(sin(angle + M_PI - M_PI / 3) * 8, cos(angle + M_PI - M_PI / 3) * 8);
+        
+        painter->drawLine(end, arrowP1);
+        painter->drawLine(end, arrowP2);
+    }
+}
 
 // WAMVDashboardNode implementation
 WAMVDashboardNode::WAMVDashboardNode(const rclcpp::NodeOptions & options)
@@ -29,21 +136,34 @@ WAMVDashboardNode::WAMVDashboardNode(const rclcpp::NodeOptions & options)
             if (dashboard_) dashboard_->handleFaultDiagnosisMsg(msg);
         });
     
-    fault_features_sub_ = this->create_subscription<std_msgs::msg::Float64MultiArray>(
-        "/wamv/fault_features", 10,
-        [this](const std_msgs::msg::Float64MultiArray::SharedPtr msg) {
-            if (dashboard_) dashboard_->handleFaultFeaturesMsg(msg);
+    operational_mode_sub_ = this->create_subscription<std_msgs::msg::String>(
+        "/wamv/operational_mode", 10,
+        [this](const std_msgs::msg::String::SharedPtr msg) {
+            if (dashboard_) dashboard_->handleOperationalModeMsg(msg);
         });
     
-    wpsi_coefficient_sub_ = this->create_subscription<std_msgs::msg::Float64>(
-        "/wamv/wpsi_coefficient", 10,
-        [this](const std_msgs::msg::Float64::SharedPtr msg) {
-            if (dashboard_) dashboard_->handleWpsiCoefficientMsg(msg);
-        });
-    fault_confidence_sub_ = this->create_subscription<std_msgs::msg::Float64MultiArray>(
-        "/wamv/fault_confidences", 10,
+    thruster_health_sub_ = this->create_subscription<std_msgs::msg::Float64MultiArray>(
+        "/wamv/thruster_health", 10,
         [this](const std_msgs::msg::Float64MultiArray::SharedPtr msg) {
-            if (dashboard_) dashboard_->handleFaultConfidenceMsg(msg);
+            if (dashboard_) dashboard_->handleThrusterHealthMsg(msg);
+        });
+    
+    environmental_assistance_sub_ = this->create_subscription<std_msgs::msg::Float64MultiArray>(
+        "/wamv/environmental_assistance", 10,
+        [this](const std_msgs::msg::Float64MultiArray::SharedPtr msg) {
+            if (dashboard_) dashboard_->handleEnvironmentalAssistanceMsg(msg);
+        });
+    
+    planning_status_sub_ = this->create_subscription<std_msgs::msg::Float64MultiArray>(
+        "/wamv/planning_status", 10,
+        [this](const std_msgs::msg::Float64MultiArray::SharedPtr msg) {
+            if (dashboard_) dashboard_->handlePlanningStatusMsg(msg);
+        });
+    
+    usv_state_sub_ = this->create_subscription<geometry_msgs::msg::PoseStamped>(
+        "/wamv/usv_state", 20,
+        [this](const geometry_msgs::msg::PoseStamped::SharedPtr msg) {
+            if (dashboard_) dashboard_->handleUSVStateMsg(msg);
         });
 }
 
@@ -60,31 +180,34 @@ WAMVDashboard::WAMVDashboard(std::shared_ptr<WAMVDashboardNode> node_ptr)
         
         // Initialize data structures
         current_fault_status_ = "NO_FAULT";
-        fault_confidence_ = 0.0;
+        current_operational_mode_ = "FOLLOW_PRESET_TRAJECTORY";
+        usv_x_ = 0.0; usv_y_ = 0.0; usv_heading_ = 0.0;
+        wx_ = 0.0; wy_ = 0.0; wpsi_ = 0.0;
+        left_thruster_health_ = 100.0; right_thruster_health_ = 100.0;
+        commanded_tp_ = 0.0; commanded_ts_ = 0.0;
+        surge_assist_factor_ = 0.0; sway_assist_factor_ = 0.0; yaw_assist_factor_ = 0.0;
+        selected_harbor_zone_ = -1;
+        target_x_ = 0.0; target_y_ = 0.0;
+        path_distance_ = 0.0;
+        obstacle_free_ = true;
+        planning_active_ = false;
+        
+        // Initialize harbor zones
+        initializeHarborZones();
         
         RCLCPP_INFO(node_ptr_->get_logger(), "Setting up UI");
         // Set up the UI
         setupUI();
-
-        // Delay the first update to ensure UI is fully initialized
-        QTimer::singleShot(1000, this, [this]() {
-            RCLCPP_INFO(node_ptr_->get_logger(), "Starting update timer");
-            update_timer_ = new QTimer(this);
-            connect(update_timer_, &QTimer::timeout, this, &WAMVDashboard::updatePlots);
-            update_timer_->start(UPDATE_INTERVAL_MS);
-        });
         
-        RCLCPP_INFO(node_ptr_->get_logger(), "Creating update timer");
         // Create update timer
+        RCLCPP_INFO(node_ptr_->get_logger(), "Creating update timer");
         update_timer_ = new QTimer(this);
-        connect(update_timer_, &QTimer::timeout, this, &WAMVDashboard::updatePlots);
-        
-        RCLCPP_INFO(node_ptr_->get_logger(), "Starting timer");
+        connect(update_timer_, &QTimer::timeout, this, &WAMVDashboard::updateDashboard);
         update_timer_->start(UPDATE_INTERVAL_MS);
         
-        // Set window properties with larger size
-        setWindowTitle("WAM-V Fault Diagnosis Dashboard");
-        resize(1600, 1200);  // Increased from 1200x800
+        // Set window properties
+        setWindowTitle("WAMV Environmental Assistance Dashboard");
+        resize(1800, 1000);
         
         RCLCPP_INFO(node_ptr_->get_logger(), "WAMVDashboard constructor completed");
     } catch (const std::exception& e) {
@@ -102,731 +225,551 @@ WAMVDashboard::~WAMVDashboard()
     }
 }
 
+void WAMVDashboard::initializeHarborZones()
+{
+    // Harbor zones (safe approach areas)
+    harbor_zones_.resize(3);
+    
+    // Zone 1: [-580, 258], [-575, 240], [-600, 236], [-600, 248]
+    harbor_zones_[0] = {
+        QPointF(-580, 258), QPointF(-575, 240), 
+        QPointF(-600, 236), QPointF(-600, 248)
+    };
+    
+    // Zone 2: [-575, 222], [-575, 208], [-595, 208], [-595, 220]
+    harbor_zones_[1] = {
+        QPointF(-575, 222), QPointF(-575, 208),
+        QPointF(-595, 208), QPointF(-595, 220)
+    };
+    
+    // Zone 3: [-573, 192], [-593, 191], [-593, 183], [-584, 184]
+    harbor_zones_[2] = {
+        QPointF(-573, 192), QPointF(-593, 191),
+        QPointF(-593, 183), QPointF(-584, 184)
+    };
+    
+    // Dock areas (obstacles to avoid)
+    dock_areas_.resize(2);
+    
+    // Dock 1: [-575, 240], [-575, 222], [-595, 220], [-600, 236]
+    dock_areas_[0] = {
+        QPointF(-575, 240), QPointF(-575, 222),
+        QPointF(-595, 220), QPointF(-600, 236)
+    };
+    
+    // Dock 2: [-575, 208], [-573, 192], [-593, 191], [-595, 208]
+    dock_areas_[1] = {
+        QPointF(-575, 208), QPointF(-573, 192),
+        QPointF(-593, 191), QPointF(-595, 208)
+    };
+    
+    // Boundary lines
+    upper_boundary_ = {QPointF(-580, 258), QPointF(-600, 248)};
+    lower_boundary_ = {QPointF(-584, 184), QPointF(-593, 183)};
+}
+
 void WAMVDashboard::setupUI()
 {
     // Create central widget and main layout
     QWidget *central_widget = new QWidget(this);
-    QVBoxLayout *main_layout = new QVBoxLayout(central_widget);
+    QHBoxLayout *main_layout = new QHBoxLayout(central_widget);
     
-    // Create status indicator section
-    QHBoxLayout *status_layout = new QHBoxLayout();
-    QGroupBox *status_group = new QGroupBox("Fault Diagnosis Status");
-    QHBoxLayout *status_group_layout = new QHBoxLayout(status_group);
+    // Setup harbor map (left panel)
+    setupHarborMap();
     
-    // Increase font size for the group box title
-    QFont groupBoxFont = status_group->font();
-    groupBoxFont.setPointSize(14);  // Increased from default
-    groupBoxFont.setBold(true);
-    status_group->setFont(groupBoxFont);
+    // Setup control panel (right panel)
+    setupControlPanel();
     
-    status_indicator_ = new QFrame();
-    status_indicator_->setFrameShape(QFrame::Box);
-    status_indicator_->setFixedSize(70, 70);  // Increased size from 50x50
-    status_indicator_->setStyleSheet("background-color: green;");
-    
-    QVBoxLayout *status_text_layout = new QVBoxLayout();
-    fault_status_label_ = new QLabel("Status: NO_FAULT");
-    
-    // Replace single confidence label with multiple confidence labels
-    QFont confidence_font;
-    confidence_font.setPointSize(12);  // Increased from 10
-    
-    no_fault_confidence_label_ = new QLabel("NO_FAULT: 0.0%");
-    no_fault_confidence_label_->setFont(confidence_font);
-    
-    left_fault_confidence_label_ = new QLabel("LEFT_THRUST: 0.0%");
-    left_fault_confidence_label_->setFont(confidence_font);
-    
-    right_fault_confidence_label_ = new QLabel("RIGHT_THRUST: 0.0%");
-    right_fault_confidence_label_->setFont(confidence_font);
-    
-    QFont status_font = fault_status_label_->font();
-    status_font.setPointSize(16);  // Increased from 12
-    status_font.setBold(true);
-    fault_status_label_->setFont(status_font);
-    
-    status_text_layout->addWidget(fault_status_label_);
-    status_text_layout->addWidget(no_fault_confidence_label_);
-    status_text_layout->addWidget(left_fault_confidence_label_);
-    status_text_layout->addWidget(right_fault_confidence_label_);
-    
-    status_group_layout->addWidget(status_indicator_);
-    status_group_layout->addLayout(status_text_layout);
-    status_group_layout->addStretch();
-    
-    reset_button_ = new QPushButton("Reset Trajectory");
-    reset_button_->setFont(confidence_font);  // Match font size with confidence labels
-    connect(reset_button_, &QPushButton::clicked, this, &WAMVDashboard::resetTrajectory);
-    status_group_layout->addWidget(reset_button_);
-    
-    status_layout->addWidget(status_group);
-    
-    // Create charts
-    setupCharts();
-    
-    // Create layout for charts
-    QGridLayout *charts_layout = new QGridLayout();
-    
-    // Create container for disturbance charts
-    QVBoxLayout *disturbance_layout = new QVBoxLayout();
-    disturbance_layout->addWidget(wx_view_);
-    disturbance_layout->addWidget(wy_view_);
-    disturbance_layout->addWidget(wpsi_view_);
-    
-    // Add both layouts to the grid
-    QWidget *disturbance_widget = new QWidget();
-    disturbance_widget->setLayout(disturbance_layout);
-    
-    charts_layout->addWidget(disturbance_widget, 0, 0);
-    charts_layout->addWidget(trajectory_view_, 0, 1);
-    
-    // Set column stretch to make the trajectory view a bit larger
-    charts_layout->setColumnStretch(0, 1);
-    charts_layout->setColumnStretch(1, 1);
-    
-    // Add layouts to main layout
-    main_layout->addLayout(status_layout);
-    main_layout->addLayout(charts_layout);
+    // Add both panels to main layout
+    main_layout->addWidget(harbor_map_view_, 2); // 2/3 of width
+    main_layout->addWidget(control_panel_, 1);   // 1/3 of width
     
     // Set central widget
     setCentralWidget(central_widget);
 }
 
-void WAMVDashboard::setupCharts()
+void WAMVDashboard::setupHarborMap()
 {
-    // Font settings for better readability
-    QFont axisFont;
-    axisFont.setPointSize(12);
+    // Create graphics view and scene
+    harbor_map_view_ = new QGraphicsView(this);
+    harbor_map_scene_ = new QGraphicsScene(this);
+    harbor_map_view_->setScene(harbor_map_scene_);
     
-    QFont titleFont;
-    titleFont.setPointSize(14);
-    titleFont.setBold(true);
+    // Set scene rectangle to encompass harbor zones with proper scaling
+    harbor_map_scene_->setSceneRect(-650, 150, 100, 150);
     
-    // Setup wx chart
-    wx_chart_ = new QChart();
-    wx_chart_->setTitle("w_x (Linear X Disturbance)");
-    wx_chart_->setTitleFont(titleFont);
-    
-    wx_series_ = new QLineSeries();
-    wx_series_->setName("w_x");
-    wx_series_->setPen(QPen(QColor(0, 0, 255), 3));  // Thicker blue line
-    
-    wx_chart_->addSeries(wx_series_);
-    wx_chart_->createDefaultAxes();
-    wx_chart_->axes(Qt::Horizontal).first()->setTitleText("Time (s)");
-    wx_chart_->axes(Qt::Vertical).first()->setTitleText("wx");  // Simplified label
-    
-    QAbstractAxis* wxXAxis = wx_chart_->axes(Qt::Horizontal).first();
-    QAbstractAxis* wxYAxis = wx_chart_->axes(Qt::Vertical).first();
-    wxXAxis->setTitleFont(axisFont);
-    wxYAxis->setTitleFont(axisFont);
-    wxXAxis->setLabelsFont(axisFont);
-    wxYAxis->setLabelsFont(axisFont);
-    
-    wx_view_ = new QChartView(wx_chart_);
-    wx_view_->setRenderHint(QPainter::Antialiasing);
-    
-    // Setup wy chart (similar font changes)
-    wy_chart_ = new QChart();
-    wy_chart_->setTitle("w_y (Linear Y Disturbance)");
-    wy_chart_->setTitleFont(titleFont);
-    
-    wy_series_ = new QLineSeries();
-    wy_series_->setName("w_y");
-    wy_series_->setPen(QPen(QColor(0, 0, 255), 3));  // Thicker blue line
-    
-    wy_chart_->addSeries(wy_series_);
-    wy_chart_->createDefaultAxes();
-    wy_chart_->axes(Qt::Horizontal).first()->setTitleText("Time (s)");
-    wy_chart_->axes(Qt::Vertical).first()->setTitleText("wy");  // Simplified label
-    
-    QAbstractAxis* wyXAxis = wy_chart_->axes(Qt::Horizontal).first();
-    QAbstractAxis* wyYAxis = wy_chart_->axes(Qt::Vertical).first();
-    wyXAxis->setTitleFont(axisFont);
-    wyYAxis->setTitleFont(axisFont);
-    wyXAxis->setLabelsFont(axisFont);
-    wyYAxis->setLabelsFont(axisFont);
-    
-    wy_view_ = new QChartView(wy_chart_);
-    wy_view_->setRenderHint(QPainter::Antialiasing);
-    
-    // Setup wpsi chart (similar font changes)
-    wpsi_chart_ = new QChart();
-    wpsi_chart_->setTitle("w_psi (Angular Z Disturbance)");
-    wpsi_chart_->setTitleFont(titleFont);
-
-    wpsi_series_ = new QLineSeries();
-    wpsi_series_->setName("w_psi");
-    wpsi_series_->setPen(QPen(QColor(0, 0, 255), 3));  // Thicker blue line
-
-    wpsi_chart_->addSeries(wpsi_series_);
-    wpsi_chart_->createDefaultAxes();
-    wpsi_chart_->axes(Qt::Horizontal).first()->setTitleText("Time (s)");
-    wpsi_chart_->axes(Qt::Vertical).first()->setTitleText("wpsi");  // Simplified label
-
-    QAbstractAxis* wpsiXAxis = wpsi_chart_->axes(Qt::Horizontal).first();
-    QAbstractAxis* wpsiYAxis = wpsi_chart_->axes(Qt::Vertical).first();
-    wpsiXAxis->setTitleFont(axisFont);
-    wpsiYAxis->setTitleFont(axisFont);
-    wpsiXAxis->setLabelsFont(axisFont);
-    wpsiYAxis->setLabelsFont(axisFont);
-    
-    wpsi_view_ = new QChartView(wpsi_chart_);
-    wpsi_view_->setRenderHint(QPainter::Antialiasing);
-
-    // Make legends visible for all charts with bigger font
-    QFont legendFont;
-    legendFont.setPointSize(12);
-    
-    wx_chart_->legend()->setVisible(true);
-    wx_chart_->legend()->setFont(legendFont);
-    wy_chart_->legend()->setVisible(true);
-    wy_chart_->legend()->setFont(legendFont);
-    wpsi_chart_->legend()->setVisible(true);
-    wpsi_chart_->legend()->setFont(legendFont);
-    
-    // Setup trajectory chart
-    trajectory_chart_ = new QChart();
-    trajectory_chart_->setTitle("USV Trajectory");
-    trajectory_chart_->setTitleFont(titleFont);
-    
-    // Main trajectory series (blue dots for past positions)
-    trajectory_series_ = new QScatterSeries();
-    trajectory_series_->setName("Path");
-    trajectory_series_->setMarkerSize(10);
-    trajectory_series_->setColor(QColor(75, 0, 130));  // purple
-    
-    // Add a series for current vessel position (green dot)
-    vessel_orientation_series_ = new QScatterSeries();
-    vessel_orientation_series_->setName("Current Position");
-    vessel_orientation_series_->setMarkerSize(15);  // Larger marker
-    vessel_orientation_series_->setColor(QColor(0, 170, 0));  // Green
-    
-    // Add series to chart (order matters for visual layering)
-    trajectory_chart_->addSeries(trajectory_series_);
-    trajectory_chart_->addSeries(vessel_orientation_series_);
-    
-    trajectory_chart_->createDefaultAxes();
-    trajectory_chart_->axes(Qt::Horizontal).first()->setTitleText("X Position (m)");
-    trajectory_chart_->axes(Qt::Vertical).first()->setTitleText("Y Position (m)");
-    
-    QAbstractAxis* trajXAxis = trajectory_chart_->axes(Qt::Horizontal).first();
-    QAbstractAxis* trajYAxis = trajectory_chart_->axes(Qt::Vertical).first();
-    trajXAxis->setTitleFont(axisFont);
-    trajYAxis->setTitleFont(axisFont);
-    trajXAxis->setLabelsFont(axisFont);
-    trajYAxis->setLabelsFont(axisFont);
-    
-    // Set chart axes to be equal to preserve aspect ratio with smaller range
-    QValueAxis *x_axis = qobject_cast<QValueAxis*>(trajectory_chart_->axes(Qt::Horizontal).first());
-    QValueAxis *y_axis = qobject_cast<QValueAxis*>(trajectory_chart_->axes(Qt::Vertical).first());
-    
-    if (x_axis && y_axis) {
-        x_axis->setRange(-20, 20);  // Reduced from -50,50 for better visibility
-        y_axis->setRange(-20, 20);  // Reduced from -50,50 for better visibility
-    }
-    
-    trajectory_view_ = new QChartView(trajectory_chart_);
-    trajectory_view_->setRenderHint(QPainter::Antialiasing);
-}
-
-void WAMVDashboard::handleFaultConfidenceMsg(const std_msgs::msg::Float64MultiArray::SharedPtr msg)
-{
-    if (msg->data.size() >= 3) {
-        no_fault_confidence_ = msg->data[0] * 100.0; // Convert to percentage
-        left_fault_confidence_ = msg->data[1] * 100.0;
-        right_fault_confidence_ = msg->data[2] * 100.0;
+    // Add harbor zones with scaling factor for better visibility
+    double scale_factor = 5.0; // Make harbor zones 5x larger for visibility
+    harbor_zone_items_.resize(harbor_zones_.size());
+    for (size_t i = 0; i < harbor_zones_.size(); ++i) {
+        QPolygonF polygon;
+        for (const auto& point : harbor_zones_[i]) {
+            // Apply 90-degree counter-clockwise rotation AND horizontal flip
+            // Rotation: (x,y) -> (-y,x), then flip: (-y,x) -> (-(-y),x) = (y,x)
+            // Combined: (x,y) -> (y,-x) for the flip you want
+            double rotated_x = -point.y() * scale_factor;  // Negative for horizontal flip
+            double rotated_y = -point.x() * scale_factor;
+            polygon << QPointF(rotated_x, rotated_y);
+        }
+        harbor_zone_items_[i] = harbor_map_scene_->addPolygon(
+            polygon, QPen(QColor(0, 150, 0), 2), QBrush(QColor(0, 255, 0, 80)));
         
-        // Update the labels
-        no_fault_confidence_label_->setText(QString("NO_FAULT: %1%").arg(no_fault_confidence_, 0, 'f', 1));
-        left_fault_confidence_label_->setText(QString("LEFT_THRUST: %1%").arg(left_fault_confidence_, 0, 'f', 1));
-        right_fault_confidence_label_->setText(QString("RIGHT_THRUST: %1%").arg(right_fault_confidence_, 0, 'f', 1));
+        // Add zone label
+        QPointF center = polygon.boundingRect().center();
+        QGraphicsTextItem* label = harbor_map_scene_->addText(
+            QString("Zone %1").arg(i + 1), QFont("Arial", 10, QFont::Bold));
+        label->setPos(center - QPointF(20, 5));
+        label->setDefaultTextColor(QColor(0, 100, 0));
     }
+    
+    // Add dock areas with same transformation
+    dock_area_items_.resize(dock_areas_.size());
+    for (size_t i = 0; i < dock_areas_.size(); ++i) {
+        QPolygonF polygon;
+        for (const auto& point : dock_areas_[i]) {
+            // Apply same transformation as harbor zones
+            double rotated_x = -point.y() * scale_factor;
+            double rotated_y = -point.x() * scale_factor;
+            polygon << QPointF(rotated_x, rotated_y);
+        }
+        dock_area_items_[i] = harbor_map_scene_->addPolygon(
+            polygon, QPen(QColor(150, 0, 0), 2), QBrush(QColor(255, 0, 0, 80)));
+        
+        // Add dock label
+        QPointF center = polygon.boundingRect().center();
+        QGraphicsTextItem* label = harbor_map_scene_->addText(
+            QString("Dock %1").arg(i + 1), QFont("Arial", 10, QFont::Bold));
+        label->setPos(center - QPointF(20, 5));
+        label->setDefaultTextColor(QColor(150, 0, 0));
+    }
+    
+    // Add boundary lines with transformation
+    QPointF upper_start(-upper_boundary_[0].y() * scale_factor, -upper_boundary_[0].x() * scale_factor);
+    QPointF upper_end(-upper_boundary_[1].y() * scale_factor, -upper_boundary_[1].x() * scale_factor);
+    upper_boundary_item_ = harbor_map_scene_->addLine(
+        upper_start.x(), upper_start.y(), upper_end.x(), upper_end.y(),
+        QPen(QColor(255, 0, 0), 2, Qt::DashLine));
+    
+    QPointF lower_start(-lower_boundary_[0].y() * scale_factor, -lower_boundary_[0].x() * scale_factor);
+    QPointF lower_end(-lower_boundary_[1].y() * scale_factor, -lower_boundary_[1].x() * scale_factor);
+    lower_boundary_item_ = harbor_map_scene_->addLine(
+        lower_start.x(), lower_start.y(), lower_end.x(), lower_end.y(),
+        QPen(QColor(255, 0, 0), 2, Qt::DashLine));
+    
+    // Update scene rectangle to fit transformed coordinates  
+    harbor_map_scene_->setSceneRect(-1300, 2500, 500, 750);
+    
+    // Initialize USV item (will be positioned in update function)
+    usv_item_ = new USVGraphicsItem(0, 0, 0);
+    harbor_map_scene_->addItem(usv_item_);
+    
+    // Initialize environmental force arrows
+    wx_arrow_ = new ForceArrowItem(0, 0, 0, 0, "Fx");
+    wy_arrow_ = new ForceArrowItem(0, 0, 0, 0, "Fy");
+    wpsi_arrow_ = new ForceArrowItem(0, 0, 0, 0, "Mz");
+    
+    harbor_map_scene_->addItem(wx_arrow_);
+    harbor_map_scene_->addItem(wy_arrow_);
+    harbor_map_scene_->addItem(wpsi_arrow_);
+    
+    // Initialize planned path and target highlighting (initially hidden)
+    planned_path_item_ = harbor_map_scene_->addLine(0, 0, 0, 0, QPen(QColor(0, 0, 255), 3, Qt::DashLine));
+    planned_path_item_->setVisible(false);
+    
+    target_zone_highlight_ = harbor_map_scene_->addEllipse(0, 0, 30, 30, 
+        QPen(QColor(255, 200, 0), 4), QBrush(QColor(255, 200, 0, 50)));
+    target_zone_highlight_->setVisible(false);
+    
+    // Set view properties
+    harbor_map_view_->setDragMode(QGraphicsView::ScrollHandDrag);
+    harbor_map_view_->setRenderHint(QPainter::Antialiasing);
 }
 
+void WAMVDashboard::setupControlPanel()
+{
+    control_panel_ = new QFrame(this);
+    control_panel_->setFrameShape(QFrame::Box);
+    control_panel_->setMaximumWidth(400);
+    
+    QVBoxLayout *panel_layout = new QVBoxLayout(control_panel_);
+    
+    // Operational Mode Section
+    QGroupBox *mode_group = new QGroupBox("Operational Mode");
+    QVBoxLayout *mode_layout = new QVBoxLayout(mode_group);
+    
+    operational_mode_label_ = new QLabel("FOLLOW_PRESET_TRAJECTORY");
+    operational_mode_label_->setFont(QFont("Arial", 12, QFont::Bold));
+    mode_layout->addWidget(operational_mode_label_);
+    
+    // Fault Status Section
+    QGroupBox *fault_group = new QGroupBox("System Status");
+    QHBoxLayout *fault_layout = new QHBoxLayout(fault_group);
+    
+    status_indicator_ = new QFrame();
+    status_indicator_->setFrameShape(QFrame::Box);
+    status_indicator_->setFixedSize(50, 50);
+    status_indicator_->setStyleSheet("background-color: green;");
+    
+    fault_status_label_ = new QLabel("Status: NO_FAULT");
+    fault_status_label_->setFont(QFont("Arial", 12, QFont::Bold));
+    
+    fault_layout->addWidget(status_indicator_);
+    fault_layout->addWidget(fault_status_label_);
+    fault_layout->addStretch();
+    
+    // Thruster Health Section
+    QGroupBox *thruster_group = new QGroupBox("Thruster Health");
+    QVBoxLayout *thruster_layout = new QVBoxLayout(thruster_group);
+    
+    QHBoxLayout *left_layout = new QHBoxLayout();
+    left_layout->addWidget(new QLabel("Left:"));
+    left_thruster_bar_ = new QProgressBar();
+    left_thruster_bar_->setRange(0, 100);
+    left_thruster_bar_->setValue(100);
+    left_thrust_label_ = new QLabel("0 N");
+    left_layout->addWidget(left_thruster_bar_);
+    left_layout->addWidget(left_thrust_label_);
+    
+    QHBoxLayout *right_layout = new QHBoxLayout();
+    right_layout->addWidget(new QLabel("Right:"));
+    right_thruster_bar_ = new QProgressBar();
+    right_thruster_bar_->setRange(0, 100);
+    right_thruster_bar_->setValue(100);
+    right_thrust_label_ = new QLabel("0 N");
+    right_layout->addWidget(right_thruster_bar_);
+    right_layout->addWidget(right_thrust_label_);
+    
+    thruster_layout->addLayout(left_layout);
+    thruster_layout->addLayout(right_layout);
+    
+    // Environmental Assistance Section
+    QGroupBox *assist_group = new QGroupBox("Environmental Assistance");
+    QVBoxLayout *assist_layout = new QVBoxLayout(assist_group);
+    
+    QHBoxLayout *surge_layout = new QHBoxLayout();
+    surge_layout->addWidget(new QLabel("Surge (X):"));
+    surge_assist_indicator_ = new QFrame();
+    surge_assist_indicator_->setFrameShape(QFrame::Box);
+    surge_assist_indicator_->setFixedSize(20, 20);
+    surge_assist_indicator_->setStyleSheet("background-color: gray;");
+    surge_assist_label_ = new QLabel("Inactive");
+    surge_layout->addWidget(surge_assist_indicator_);
+    surge_layout->addWidget(surge_assist_label_);
+    surge_layout->addStretch();
+    
+    QHBoxLayout *sway_layout = new QHBoxLayout();
+    sway_layout->addWidget(new QLabel("Sway (Y):"));
+    sway_assist_indicator_ = new QFrame();
+    sway_assist_indicator_->setFrameShape(QFrame::Box);
+    sway_assist_indicator_->setFixedSize(20, 20);
+    sway_assist_indicator_->setStyleSheet("background-color: gray;");
+    sway_assist_label_ = new QLabel("Inactive");
+    sway_layout->addWidget(sway_assist_indicator_);
+    sway_layout->addWidget(sway_assist_label_);
+    sway_layout->addStretch();
+    
+    QHBoxLayout *yaw_layout = new QHBoxLayout();
+    yaw_layout->addWidget(new QLabel("Yaw (Z):"));
+    yaw_assist_indicator_ = new QFrame();
+    yaw_assist_indicator_->setFrameShape(QFrame::Box);
+    yaw_assist_indicator_->setFixedSize(20, 20);
+    yaw_assist_indicator_->setStyleSheet("background-color: gray;");
+    yaw_assist_label_ = new QLabel("Inactive");
+    yaw_layout->addWidget(yaw_assist_indicator_);
+    yaw_layout->addWidget(yaw_assist_label_);
+    yaw_layout->addStretch();
+    
+    assist_layout->addLayout(surge_layout);
+    assist_layout->addLayout(sway_layout);
+    assist_layout->addLayout(yaw_layout);
+    
+    // Planning Status Section
+    QGroupBox *planning_group = new QGroupBox("Mission Planning");
+    QVBoxLayout *planning_layout = new QVBoxLayout(planning_group);
+    
+    planning_status_label_ = new QLabel("Following preset trajectory");
+    target_zone_label_ = new QLabel("Target Zone: None");
+    distance_label_ = new QLabel("Distance: N/A");
+    
+    planning_layout->addWidget(planning_status_label_);
+    planning_layout->addWidget(target_zone_label_);
+    planning_layout->addWidget(distance_label_);
+    
+    // Reset Button
+    reset_button_ = new QPushButton("Reset View");
+    connect(reset_button_, &QPushButton::clicked, this, &WAMVDashboard::resetView);
+    
+    // Add all groups to panel
+    panel_layout->addWidget(mode_group);
+    panel_layout->addWidget(fault_group);
+    panel_layout->addWidget(thruster_group);
+    panel_layout->addWidget(assist_group);
+    panel_layout->addWidget(planning_group);
+    panel_layout->addWidget(reset_button_);
+    panel_layout->addStretch();
+}
+
+// Message handlers
 void WAMVDashboard::handleDisturbanceMsg(const geometry_msgs::msg::TwistStamped::SharedPtr msg)
 {
-    // Get current time
-    auto time_point = node_ptr_->now();
-    double current_time = time_point.seconds();
-    
-    // If this is the first message, set the reference time
-    if (time_data_.empty()) {
-        start_time_ = current_time;
-        time_data_.push_back(0.0);
-    } else {
-        // Calculate relative time since start
-        time_data_.push_back(current_time - start_time_);
-    }
-    
-    // Store disturbance values
-    wx_data_.push_back(msg->twist.linear.x);
-    wy_data_.push_back(msg->twist.linear.y);
-    wpsi_data_.push_back(msg->twist.angular.z);
-    
-    // Calculate calibrated wpsi (placeholder - actual calculation will depend on your implementation)
-    // This should be replaced with actual calibration logic based on your system
-    double calibrated_wpsi = msg->twist.angular.z;  // Replace with actual calibration
-    wpsi_calibrated_data_.push_back(calibrated_wpsi);
-    
-    // Limit data size
-    if (time_data_.size() > static_cast<size_t>(MAX_DATA_POINTS)) {
-        time_data_.pop_front();
-        wx_data_.pop_front();
-        wy_data_.pop_front();
-        wpsi_data_.pop_front();
-        wpsi_calibrated_data_.pop_front();
-    }
-    // Add the current fault status to history
-    fault_active_history_.push_back(current_fault_status_ != "NO_FAULT");
-    
-    // Limit data size
-    if (fault_active_history_.size() > static_cast<size_t>(MAX_DATA_POINTS)) {
-        fault_active_history_.pop_front();
-    }
+    wx_ = msg->twist.linear.x;
+    wy_ = msg->twist.linear.y;
+    wpsi_ = msg->twist.angular.z;
 }
 
 void WAMVDashboard::handleOdomMsg(const nav_msgs::msg::Odometry::SharedPtr msg)
 {
-    // Extract position
-    double x = msg->pose.pose.position.x;
-    double y = msg->pose.pose.position.y;
+    // Extract position and orientation from odometry
+    usv_x_ = msg->pose.pose.position.x;
+    usv_y_ = msg->pose.pose.position.y;
     
-    // Extract orientation (yaw)
+    // Convert quaternion to yaw
     tf2::Quaternion quat(
         msg->pose.pose.orientation.x,
         msg->pose.pose.orientation.y,
         msg->pose.pose.orientation.z,
         msg->pose.pose.orientation.w);
     
-    // Convert quaternion to RPY
     double roll, pitch, yaw;
     tf2::Matrix3x3(quat).getRPY(roll, pitch, yaw);
-    
-    // Store trajectory points
-    trajectory_x_.push_back(x);
-    trajectory_y_.push_back(y);
-    trajectory_yaw_.push_back(yaw);
-    
-    // Update current vessel position marker
-    if (vessel_orientation_series_) {
-        vessel_orientation_series_->clear();
-        vessel_orientation_series_->append(x, y);
-    }
-    
-    // Limit data size to prevent memory issues for long runs
-    const size_t MAX_TRAJECTORY_POINTS = 10000;
-    if (trajectory_x_.size() > MAX_TRAJECTORY_POINTS) {
-        trajectory_x_.erase(trajectory_x_.begin());
-        trajectory_y_.erase(trajectory_y_.begin());
-        trajectory_yaw_.erase(trajectory_yaw_.begin());
-    }
+    usv_heading_ = yaw;
 }
 
 void WAMVDashboard::handleFaultDiagnosisMsg(const std_msgs::msg::String::SharedPtr msg)
 {
     // Parse fault diagnosis message
-    // Expected format: "Fault: FAULT_TYPE (Confidence: XX.X%)"
     std::string message = msg->data;
-    
     size_t fault_pos = message.find("Fault: ");
-    size_t confidence_pos = message.find("Confidence: ");
     
-    if (fault_pos != std::string::npos && confidence_pos != std::string::npos) {
-        // Extract fault type
-        size_t fault_start = fault_pos + 7;  // Length of "Fault: "
+    if (fault_pos != std::string::npos) {
+        size_t fault_start = fault_pos + 7;
         size_t fault_end = message.find(" ", fault_start);
-        
         if (fault_end != std::string::npos) {
             current_fault_status_ = message.substr(fault_start, fault_end - fault_start);
         }
-        
-        // Extract confidence
-        size_t confidence_start = confidence_pos + 12;  // Length of "Confidence: "
-        size_t confidence_end = message.find("%", confidence_start);
-        
-        if (confidence_end != std::string::npos) {
-            std::string confidence_str = message.substr(confidence_start, confidence_end - confidence_start);
-            try {
-                fault_confidence_ = std::stod(confidence_str);
-            } catch (const std::exception& e) {
-                RCLCPP_WARN(node_ptr_->get_logger(), "Failed to parse confidence value: %s", e.what());
-            }
-        }
-
-        // Store previous fault status
-        bool was_fault_active = (current_fault_status_ != "NO_FAULT");
-        
-        // Get new fault status
-        bool is_fault_active = (current_fault_status_ != "NO_FAULT");
-        
-        // If transitioning from normal to fault, record the time
-        if (!was_fault_active && is_fault_active) {
-            fault_start_time_ = time_data_.empty() ? 0.0 : time_data_.back();
-            RCLCPP_INFO(node_ptr_->get_logger(), "Fault detected at time: %.2f", fault_start_time_);
-        }
-        
-        // Update the status display
-        updateStatusDisplay();
     }
 }
 
-void WAMVDashboard::handleFaultFeaturesMsg(const std_msgs::msg::Float64MultiArray::SharedPtr /*msg*/)
+void WAMVDashboard::handleOperationalModeMsg(const std_msgs::msg::String::SharedPtr msg)
 {
-    // Process fault features if needed
-    // Currently this is a placeholder - you can use this data for additional visualization
+    current_operational_mode_ = msg->data;
 }
 
-void WAMVDashboard::handleWpsiCoefficientMsg(const std_msgs::msg::Float64::SharedPtr /*msg*/)
+void WAMVDashboard::handleThrusterHealthMsg(const std_msgs::msg::Float64MultiArray::SharedPtr msg)
 {
-    // Process wpsi coefficient if needed
-    // This could be used for the calibrated wpsi calculation
+    if (msg->data.size() >= 4) {
+        left_thruster_health_ = msg->data[0];
+        right_thruster_health_ = msg->data[1];
+        commanded_tp_ = msg->data[2];
+        commanded_ts_ = msg->data[3];
+    }
 }
 
-void WAMVDashboard::updatePlots()
+void WAMVDashboard::handleEnvironmentalAssistanceMsg(const std_msgs::msg::Float64MultiArray::SharedPtr msg)
+{
+    if (msg->data.size() >= 6) {
+        surge_assist_factor_ = msg->data[0];
+        sway_assist_factor_ = msg->data[1];
+        yaw_assist_factor_ = msg->data[2];
+        // wx_, wy_, wpsi_ are updated from disturbance message
+    }
+}
+
+void WAMVDashboard::handlePlanningStatusMsg(const std_msgs::msg::Float64MultiArray::SharedPtr msg)
+{
+    if (msg->data.size() >= 6) {
+        selected_harbor_zone_ = static_cast<int>(msg->data[0]);
+        target_x_ = msg->data[1];
+        target_y_ = msg->data[2];
+        path_distance_ = msg->data[3];
+        obstacle_free_ = (msg->data[5] > 0.5);
+        planning_active_ = true;
+    }
+}
+
+void WAMVDashboard::handleUSVStateMsg(const geometry_msgs::msg::PoseStamped::SharedPtr msg)
+{
+    // This provides enhanced USV state data if needed
+    // For now, we use the odometry message for position updates
+    Q_UNUSED(msg);
+}
+
+void WAMVDashboard::updateDashboard()
 {
     try {
-        // Update trajectory plot
-        if (trajectory_series_ && !trajectory_x_.empty() && !trajectory_y_.empty()) {
-            // Update main trajectory series
-            trajectory_series_->clear();
-            for (size_t i = 0; i < trajectory_x_.size(); i++) {
-                trajectory_series_->append(trajectory_x_[i], trajectory_y_[i]);
-            }
-            // Auto-adjust trajectory chart axes if needed
-            if (!trajectory_x_.empty() && !trajectory_y_.empty()) {
-                double min_x = *std::min_element(trajectory_x_.begin(), trajectory_x_.end());
-                double max_x = *std::max_element(trajectory_x_.begin(), trajectory_x_.end());
-                double min_y = *std::min_element(trajectory_y_.begin(), trajectory_y_.end());
-                double max_y = *std::max_element(trajectory_y_.begin(), trajectory_y_.end());
-                
-                // Calculate the trajectory bounds
-                double x_range = max_x - min_x;
-                double y_range = max_y - min_y;
-                double max_range = std::max(x_range, y_range);
-                
-                // Add smaller margin for tighter framing
-                double margin = std::max(5.0, max_range * 0.15);
-                
-                // Calculate the center point
-                double center_x = (min_x + max_x) / 2.0;
-                double center_y = (min_y + max_y) / 2.0;
-                
-                // Set symmetric bounds around the center point
-                double new_min_x = center_x - max_range / 2.0 - margin;
-                double new_max_x = center_x + max_range / 2.0 + margin;
-                double new_min_y = center_y - max_range / 2.0 - margin;
-                double new_max_y = center_y + max_range / 2.0 + margin;
-                
-                QValueAxis *x_axis = qobject_cast<QValueAxis*>(trajectory_chart_->axes(Qt::Horizontal).first());
-                QValueAxis *y_axis = qobject_cast<QValueAxis*>(trajectory_chart_->axes(Qt::Vertical).first());
-                
-                if (x_axis && y_axis) {
-                    x_axis->setRange(new_min_x, new_max_x);
-                    y_axis->setRange(new_min_y, new_max_y);
-                }
-            }
-        }
-        
-        // Update wx chart with color-coded series
-        if (wx_chart_ && !wx_data_.empty() && !time_data_.empty()) {
-            // Create separate series for normal and fault conditions
-            QLineSeries *wx_normal_series = new QLineSeries();
-            QLineSeries *wx_fault_series = new QLineSeries();
-            QScatterSeries *wx_transition_points = new QScatterSeries();
-            
-            // Set colors and styles with thicker lines
-            QPen normalPen(QColor(0, 100, 255));  // Darker blue
-            normalPen.setWidth(3);  // Thicker line
-            
-            QPen faultPen(QColor(255, 50, 50));   // Brighter red
-            faultPen.setWidth(3);  // Thicker line
-            
-            wx_normal_series->setPen(normalPen);
-            wx_normal_series->setName("Normal");
-            
-            wx_fault_series->setPen(faultPen);
-            wx_fault_series->setName("Fault Active");
-            
-            wx_transition_points->setMarkerSize(12);  // Increased from 8
-            wx_transition_points->setColor(QColor(255, 200, 0));  // Brighter yellow
-            wx_transition_points->setName("Fault Start");
-            
-            // Fill the series with data
-            for (size_t i = 0; i < std::min(wx_data_.size(), time_data_.size()); i++) {
-                bool is_fault = (i < fault_active_history_.size()) ? fault_active_history_[i] : false;
-                bool is_transition = (i > 0 && 
-                                    i < fault_active_history_.size() && 
-                                    !fault_active_history_[i-1] && 
-                                    fault_active_history_[i]);
-                if (is_fault) {
-                    wx_fault_series->append(time_data_[i], wx_data_[i]);
-                } else {
-                    wx_normal_series->append(time_data_[i], wx_data_[i]);
-                }
-                if (is_transition) {
-                    wx_transition_points->append(time_data_[i], wx_data_[i]);
-                }
-            }
-            
-            // Update the chart
-            wx_chart_->removeAllSeries();
-            wx_chart_->addSeries(wx_normal_series);
-            wx_chart_->addSeries(wx_fault_series);
-            wx_chart_->addSeries(wx_transition_points);
-            
-            // Re-attach axes
-            wx_chart_->createDefaultAxes();
-            wx_chart_->axes(Qt::Horizontal).first()->setTitleText("Time (s)");
-            wx_chart_->axes(Qt::Vertical).first()->setTitleText("wx");  // Simplified label
-            
-            // Set larger fonts for axes
-            QFont axisFont;
-            axisFont.setPointSize(12);
-            wx_chart_->axes(Qt::Horizontal).first()->setTitleFont(axisFont);
-            wx_chart_->axes(Qt::Vertical).first()->setTitleFont(axisFont);
-            wx_chart_->axes(Qt::Horizontal).first()->setLabelsFont(axisFont);
-            wx_chart_->axes(Qt::Vertical).first()->setLabelsFont(axisFont);
-            
-            // Update time axis range
-            QValueAxis *x_axis = qobject_cast<QValueAxis*>(wx_chart_->axes(Qt::Horizontal).first());
-            if (x_axis) {
-                double max_time = time_data_.back();
-                double min_time = std::max(0.0, max_time - 10.0); // 10 second window
-                x_axis->setRange(min_time, max_time);
-            }
-            
-            // Update y-axis range
-            updateValueAxis(wx_chart_, wx_data_);
-        }
-        
-        // Update wy chart with color-coded series (same changes as for wx chart)
-        if (wy_chart_ && !wy_data_.empty() && !time_data_.empty()) {
-            // Create separate series for normal and fault conditions
-            QLineSeries *wy_normal_series = new QLineSeries();
-            QLineSeries *wy_fault_series = new QLineSeries();
-            QScatterSeries *wy_transition_points = new QScatterSeries();
-            
-            // Set colors and styles with thicker lines
-            QPen normalPen(QColor(0, 100, 255));  // Darker blue
-            normalPen.setWidth(3);  // Thicker line
-            
-            QPen faultPen(QColor(255, 50, 50));   // Brighter red
-            faultPen.setWidth(3);  // Thicker line
-            
-            wy_normal_series->setPen(normalPen);
-            wy_normal_series->setName("Normal");
-            
-            wy_fault_series->setPen(faultPen);
-            wy_fault_series->setName("Fault Active");
-            
-            wy_transition_points->setMarkerSize(12);  // Increased from 8
-            wy_transition_points->setColor(QColor(255, 200, 0));  // Brighter yellow
-            wy_transition_points->setName("Fault Start");
-            
-            // Fill the series with data
-            for (size_t i = 0; i < std::min(wy_data_.size(), time_data_.size()); i++) {
-                bool is_fault = (i < fault_active_history_.size()) ? fault_active_history_[i] : false;
-                bool is_transition = (i > 0 && 
-                                    i < fault_active_history_.size() && 
-                                    !fault_active_history_[i-1] && 
-                                    fault_active_history_[i]);
-                if (is_fault) {
-                    wy_fault_series->append(time_data_[i], wy_data_[i]);
-                } else {
-                    wy_normal_series->append(time_data_[i], wy_data_[i]);
-                }
-                if (is_transition) {
-                    wy_transition_points->append(time_data_[i], wy_data_[i]);
-                }
-            }
-            
-            // Update the chart
-            wy_chart_->removeAllSeries();
-            wy_chart_->addSeries(wy_normal_series);
-            wy_chart_->addSeries(wy_fault_series);
-            wy_chart_->addSeries(wy_transition_points);
-            
-            // Re-attach axes
-            wy_chart_->createDefaultAxes();
-            wy_chart_->axes(Qt::Horizontal).first()->setTitleText("Time (s)");
-            wy_chart_->axes(Qt::Vertical).first()->setTitleText("wy");  // Simplified label
-            
-            // Set larger fonts for axes
-            QFont axisFont;
-            axisFont.setPointSize(12);
-            wy_chart_->axes(Qt::Horizontal).first()->setTitleFont(axisFont);
-            wy_chart_->axes(Qt::Vertical).first()->setTitleFont(axisFont);
-            wy_chart_->axes(Qt::Horizontal).first()->setLabelsFont(axisFont);
-            wy_chart_->axes(Qt::Vertical).first()->setLabelsFont(axisFont);
-            
-            // Update time axis range
-            QValueAxis *x_axis = qobject_cast<QValueAxis*>(wy_chart_->axes(Qt::Horizontal).first());
-            if (x_axis) {
-                double max_time = time_data_.back();
-                double min_time = std::max(0.0, max_time - 10.0); // 10 second window
-                x_axis->setRange(min_time, max_time);
-            }
-            
-            // Update y-axis range
-            updateValueAxis(wy_chart_, wy_data_);
-        }
-        
-        // Update wpsi chart with color-coded series (same changes as for other charts)
-        if (wpsi_chart_ && !wpsi_calibrated_data_.empty() && !time_data_.empty()) {
-            // Create separate series for normal and fault conditions
-            QLineSeries *wpsi_normal_series = new QLineSeries();
-            QLineSeries *wpsi_fault_series = new QLineSeries();
-            QScatterSeries *wpsi_transition_points = new QScatterSeries();
-            
-            // Set colors and styles with thicker lines
-            QPen normalPen(QColor(0, 100, 255));  // Darker blue
-            normalPen.setWidth(3);  // Thicker line
-            
-            QPen faultPen(QColor(255, 50, 50));   // Brighter red
-            faultPen.setWidth(3);  // Thicker line
-            
-            wpsi_normal_series->setPen(normalPen);
-            wpsi_normal_series->setName("Normal");
-            
-            wpsi_fault_series->setPen(faultPen);
-            wpsi_fault_series->setName("Fault Active");
-            
-            wpsi_transition_points->setMarkerSize(12);  // Increased from 8
-            wpsi_transition_points->setColor(QColor(255, 200, 0));  // Brighter yellow
-            wpsi_transition_points->setName("Fault Start");
-            
-            // Fill the series with data
-            for (size_t i = 0; i < std::min(wpsi_calibrated_data_.size(), time_data_.size()); i++) {
-                bool is_fault = (i < fault_active_history_.size()) ? fault_active_history_[i] : false;
-                bool is_transition = (i > 0 && 
-                                    i < fault_active_history_.size() && 
-                                    !fault_active_history_[i-1] && 
-                                    fault_active_history_[i]);
-                if (is_fault) {
-                    wpsi_fault_series->append(time_data_[i], wpsi_calibrated_data_[i]);
-                } else {
-                    wpsi_normal_series->append(time_data_[i], wpsi_calibrated_data_[i]);
-                }
-                if (is_transition) {
-                    wpsi_transition_points->append(time_data_[i], wpsi_calibrated_data_[i]);
-                }
-            }
-            
-            // Update the chart
-            wpsi_chart_->removeAllSeries();
-            wpsi_chart_->addSeries(wpsi_normal_series);
-            wpsi_chart_->addSeries(wpsi_fault_series);
-            wpsi_chart_->addSeries(wpsi_transition_points);
-            
-            // Re-attach axes
-            wpsi_chart_->createDefaultAxes();
-            wpsi_chart_->axes(Qt::Horizontal).first()->setTitleText("Time (s)");
-            wpsi_chart_->axes(Qt::Vertical).first()->setTitleText("wpsi");  // Simplified label
-            
-            // Set larger fonts for axes
-            QFont axisFont;
-            axisFont.setPointSize(12);
-            wpsi_chart_->axes(Qt::Horizontal).first()->setTitleFont(axisFont);
-            wpsi_chart_->axes(Qt::Vertical).first()->setTitleFont(axisFont);
-            wpsi_chart_->axes(Qt::Horizontal).first()->setLabelsFont(axisFont);
-            wpsi_chart_->axes(Qt::Vertical).first()->setLabelsFont(axisFont);
-            
-            // Update time axis range
-            QValueAxis *x_axis = qobject_cast<QValueAxis*>(wpsi_chart_->axes(Qt::Horizontal).first());
-            if (x_axis) {
-                double max_time = time_data_.back();
-                double min_time = std::max(0.0, max_time - 10.0); // 10 second window
-                x_axis->setRange(min_time, max_time);
-            }
-            
-            // Update y-axis range
-            updateValueAxis(wpsi_chart_, wpsi_calibrated_data_);
-        }
+        updateHarborMapDisplay();
+        updateControlPanelDisplay();
     } catch (const std::exception& e) {
-        RCLCPP_ERROR(node_ptr_->get_logger(), "Error in updatePlots: %s", e.what());
-    } catch (...) {
-        RCLCPP_ERROR(node_ptr_->get_logger(), "Unknown error in updatePlots");
+        RCLCPP_ERROR(node_ptr_->get_logger(), "Error in updateDashboard: %s", e.what());
     }
 }
 
-
-
-void WAMVDashboard::resetTrajectory()
+void WAMVDashboard::updateHarborMapDisplay()
 {
-    // Clear trajectory data
-    trajectory_x_.clear();
-    trajectory_y_.clear();
-    trajectory_yaw_.clear();
-    
-    // Clear all trajectory-related series
-    trajectory_series_->clear();
-    vessel_orientation_series_->clear();
-    
-    // Reset trajectory chart axes
-    QValueAxis *x_axis = qobject_cast<QValueAxis*>(trajectory_chart_->axes(Qt::Horizontal).first());
-    QValueAxis *y_axis = qobject_cast<QValueAxis*>(trajectory_chart_->axes(Qt::Vertical).first());
-    
-    if (x_axis && y_axis) {
-        x_axis->setRange(-20, 20);  // Use smaller initial range for better visibility
-        y_axis->setRange(-20, 20);
-        x_axis->setGridLineVisible(true);
-        y_axis->setGridLineVisible(true);
+    // Update USV position and heading
+    if (usv_item_) {
+        usv_item_->updatePosition(usv_x_, usv_y_, usv_heading_);
     }
     
-    // Notify user
-    QMessageBox::information(this, "Trajectory Reset", "Trajectory display has been reset.");
+    // Update environmental force arrows
+    updateEnvironmentalForces();
+    
+    // Update planning display
+    updatePlanningDisplay();
 }
 
-void WAMVDashboard::updateStatusDisplay()
+void WAMVDashboard::updateControlPanelDisplay()
 {
-    // Update fault status label
-    fault_status_label_->setText("Status: " + QString::fromStdString(current_fault_status_));
+    // Update operational mode
+    operational_mode_label_->setText(QString::fromStdString(current_operational_mode_));
     
-    // Update status indicator color
+    // Update fault status with debugging
+    QString fault_display = QString("Status: %1").arg(QString::fromStdString(current_fault_status_));
+    fault_status_label_->setText(fault_display);
+    
+    // Log fault status periodically for debugging
+    static int debug_counter = 0;
+    debug_counter++;
+    if (debug_counter % 50 == 0) { // Log every 5 seconds at 100ms update rate
+        RCLCPP_INFO(node_ptr_->get_logger(), "Current fault status in GUI: %s", current_fault_status_.c_str());
+    }
+    
     QColor status_color = getFaultStatusColor();
     status_indicator_->setStyleSheet(QString("background-color: %1;").arg(status_color.name()));
+    
+    // Update thruster health
+    left_thruster_bar_->setValue(static_cast<int>(left_thruster_health_));
+    right_thruster_bar_->setValue(static_cast<int>(right_thruster_health_));
+    left_thrust_label_->setText(QString("%1 N").arg(commanded_tp_, 0, 'f', 1));
+    right_thrust_label_->setText(QString("%1 N").arg(commanded_ts_, 0, 'f', 1));
+    
+    // Update environmental assistance status
+    surge_assist_indicator_->setStyleSheet(
+        QString("background-color: %1;").arg(getAssistanceColor(surge_assist_factor_).name()));
+    surge_assist_label_->setText(surge_assist_factor_ > 0.1 ? "Active" : "Inactive");
+    
+    sway_assist_indicator_->setStyleSheet(
+        QString("background-color: %1;").arg(getAssistanceColor(sway_assist_factor_).name()));
+    sway_assist_label_->setText(sway_assist_factor_ > 0.1 ? "Active" : "Inactive");
+    
+    yaw_assist_indicator_->setStyleSheet(
+        QString("background-color: %1;").arg(getAssistanceColor(yaw_assist_factor_).name()));
+    yaw_assist_label_->setText(yaw_assist_factor_ > 0.1 ? "Active" : "Inactive");
+    
+    // Update planning status
+    if (planning_active_ && selected_harbor_zone_ >= 0) {
+        planning_status_label_->setText("Adaptive return to harbor");
+        target_zone_label_->setText(QString("Target Zone: %1").arg(selected_harbor_zone_ + 1));
+        distance_label_->setText(QString("Distance: %1 m").arg(path_distance_, 0, 'f', 1));
+    } else {
+        planning_status_label_->setText("Following preset trajectory");
+        target_zone_label_->setText("Target Zone: None");
+        distance_label_->setText("Distance: N/A");
+    }
+}
+
+void WAMVDashboard::updateEnvironmentalForces()
+{
+    if (wx_arrow_ && wy_arrow_ && wpsi_arrow_) {
+        double scale_factor = 5.0;
+        double transformed_usv_x = -usv_y_ * scale_factor;  // Apply horizontal flip
+        double transformed_usv_y = -usv_x_ * scale_factor;
+        
+        // Transform environmental forces to match coordinate system
+        // Apply the same transformation to force directions
+        double transformed_wx = -wy_ * 15; // Scale for visibility  
+        double transformed_wy = -wx_ * 15;
+        
+        // Update force arrows with transformed coordinates and forces
+        wx_arrow_->updateForce(transformed_usv_x, transformed_usv_y, transformed_wx, 0);
+        wy_arrow_->updateForce(transformed_usv_x, transformed_usv_y, 0, transformed_wy);
+        
+        // For yaw moment, show as offset arrow
+        double wpsi_offset_x = 20 * cos(usv_heading_);
+        double wpsi_offset_y = 20 * sin(usv_heading_);
+        wpsi_arrow_->updateForce(transformed_usv_x + wpsi_offset_x, transformed_usv_y + wpsi_offset_y, 
+                                wpsi_ * cos(usv_heading_) * 8, wpsi_ * sin(usv_heading_) * 8);
+        
+        // Set active status based on assistance factors
+        wx_arrow_->setActive(surge_assist_factor_ > 0.1);
+        wy_arrow_->setActive(sway_assist_factor_ > 0.1);
+        wpsi_arrow_->setActive(yaw_assist_factor_ > 0.1);
+    }
+}
+
+void WAMVDashboard::updatePlanningDisplay()
+{
+    double scale_factor = 5.0;
+    double transformed_usv_x = -usv_y_ * scale_factor;  // Apply horizontal flip
+    double transformed_usv_y = -usv_x_ * scale_factor;
+    
+    if (planning_active_ && selected_harbor_zone_ >= 0 && selected_harbor_zone_ < 3) {
+        // Transform target coordinates with horizontal flip
+        double transformed_target_x = -target_y_ * scale_factor;
+        double transformed_target_y = -target_x_ * scale_factor;
+        
+        // Show planned path
+        if (planned_path_item_) {
+            planned_path_item_->setLine(transformed_usv_x, transformed_usv_y, 
+                                       transformed_target_x, transformed_target_y);
+            planned_path_item_->setVisible(true);
+        }
+        
+        // Highlight target zone
+        if (target_zone_highlight_) {
+            target_zone_highlight_->setPos(transformed_target_x - 15, transformed_target_y - 15);
+            target_zone_highlight_->setVisible(true);
+        }
+        
+        // Highlight selected harbor zone
+        if (selected_harbor_zone_ < static_cast<int>(harbor_zone_items_.size())) {
+            for (size_t i = 0; i < harbor_zone_items_.size(); ++i) {
+                if (i == static_cast<size_t>(selected_harbor_zone_)) {
+                    harbor_zone_items_[i]->setPen(QPen(QColor(255, 200, 0), 4)); // Gold highlight
+                } else {
+                    harbor_zone_items_[i]->setPen(QPen(QColor(0, 150, 0), 2)); // Normal green
+                }
+            }
+        }
+    } else {
+        // Hide planning elements
+        if (planned_path_item_) planned_path_item_->setVisible(false);
+        if (target_zone_highlight_) target_zone_highlight_->setVisible(false);
+        
+        // Reset zone highlighting
+        for (auto* zone_item : harbor_zone_items_) {
+            zone_item->setPen(QPen(QColor(0, 150, 0), 2));
+        }
+    }
+}
+
+
+
+void WAMVDashboard::resetView()
+{
+    // Reset harbor map view to show all elements
+    harbor_map_view_->fitInView(harbor_map_scene_->itemsBoundingRect(), Qt::KeepAspectRatio);
+    
+    // Center on USV if it exists
+    if (usv_item_) {
+        harbor_map_view_->centerOn(usv_item_);
+    }
 }
 
 QColor WAMVDashboard::getFaultStatusColor()
 {
-    // Choose color based on fault status and confidence
     if (current_fault_status_ == "NO_FAULT") {
-        return QColor(0, 200, 0);  // Green for normal status
-    } 
-    else if (current_fault_status_ == "LEFT_THRUST_FAILURE") {
-        // Red with intensity based on confidence (darker red for higher confidence)
-        int green = static_cast<int>(100 * (1.0 - left_fault_confidence_ / 100.0));
-        return QColor(255, green, 0);  // Red for left thrust failure
-    } 
-    else if (current_fault_status_ == "RIGHT_THRUST_FAILURE") {
-        // Also use red for right thrust failure (previously would have been yellowish)
-        int green = static_cast<int>(100 * (1.0 - right_fault_confidence_ / 100.0));
-        return QColor(255, green, 0);  // Red for right thrust failure
-    } 
-    else {
-        // Gray for unknown status
-        return QColor(128, 128, 128);
+        return QColor(0, 200, 0);  // Green
+    } else {
+        return QColor(200, 0, 0);  // Red
     }
 }
 
-// Add helper methods for axis updates
-void WAMVDashboard::updateTimeAxis(QChart *chart, double min_time, double max_time) {
-    QValueAxis *x_axis = qobject_cast<QValueAxis*>(chart->axes(Qt::Horizontal).first());
-    if (x_axis) {
-        x_axis->setRange(min_time, max_time);
-    }
-}
-
-void WAMVDashboard::updateValueAxis(QChart *chart, const std::deque<double> &data) {
-    if (data.empty()) return;
-    
-    double min_val = *std::min_element(data.begin(), data.end());
-    double max_val = *std::max_element(data.begin(), data.end());
-    double margin = std::max(0.5, (max_val - min_val) * 0.1);
-    
-    QValueAxis *y_axis = qobject_cast<QValueAxis*>(chart->axes(Qt::Vertical).first());
-    if (y_axis) {
-        y_axis->setRange(min_val - margin, max_val + margin);
+QColor WAMVDashboard::getAssistanceColor(double factor)
+{
+    if (factor > 0.1) {
+        return QColor(255, 150, 0);  // Orange for active
+    } else {
+        return QColor(128, 128, 128);  // Gray for inactive
     }
 }

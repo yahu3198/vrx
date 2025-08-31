@@ -218,6 +218,13 @@ class WAMV_MPC : public rclcpp::Node
 
     rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr fault_confidence_pub;
 
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr operational_mode_pub;
+    rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr thruster_health_pub;
+    rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr usv_state_pub;
+    rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr environmental_assistance_pub;
+    rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr planning_status_pub;
+    // rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr harbor_zones_pub; // For static data
+
     // Trajectory variables
     std::vector<std::vector<double>> trajectory;
     int line_number = 0;

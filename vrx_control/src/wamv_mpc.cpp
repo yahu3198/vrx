@@ -59,6 +59,23 @@ WAMV_MPC::WAMV_MPC()
         "/wamv/disturbance", 20);
     confidence_pub = this->create_publisher<geometry_msgs::msg::TwistStamped>(
         "/wamv/status_confidence", 20);
+    operational_mode_pub = this->create_publisher<std_msgs::msg::String>(
+        "/wamv/operational_mode", 10);
+
+    thruster_health_pub = this->create_publisher<std_msgs::msg::Float64MultiArray>(
+        "/wamv/thruster_health", 10);
+
+    usv_state_pub = this->create_publisher<geometry_msgs::msg::PoseStamped>(
+        "/wamv/usv_state", 20);
+
+    environmental_assistance_pub = this->create_publisher<std_msgs::msg::Float64MultiArray>(
+        "/wamv/environmental_assistance", 10);
+
+    planning_status_pub = this->create_publisher<std_msgs::msg::Float64MultiArray>(
+        "/wamv/planning_status", 10);
+
+    // harbor_zones_pub = this->create_publisher<std_msgs::msg::Float64MultiArray>(
+        // "/wamv/harbor_zones", 1); // Low frequency for static data
 
     // initialize
     for(unsigned int i=0; i < WAMV_NU; i++) acados_out.u0[i] = 0.0;
@@ -605,6 +622,107 @@ void WAMV_MPC::publish_cin(double Tp_mpc, double Ts_mpc)
     
     // Calculate calibrated w_psi for display
     // double calibrated_wpsi = getCalibrated_wpsi();
+    // Add this at the end of publish_cin() function, before the closing brace
+
+    // Publish fault diagnosis message
+    std_msgs::msg::String fault_msg;
+    if (iteration_count < fault_trigger) {
+        fault_msg.data = "Fault: NO_FAULT";
+    } else {
+        switch (FAULT_TYPE_TO_SIMULATE) {
+            case LEFT_THRUSTER_FAULT_SIM:
+                fault_msg.data = "Fault: LEFT_THRUST_FAILURE";
+                break;
+            case RIGHT_THRUSTER_FAULT_SIM:
+                fault_msg.data = "Fault: RIGHT_THRUST_FAILURE";
+                break;
+            default:
+                fault_msg.data = "Fault: NO_FAULT";
+        }
+    }
+    fault_diagnosis_pub->publish(fault_msg);
+
+    // Publish operational mode
+    std_msgs::msg::String mode_msg;
+    switch (current_mode) {
+        case FOLLOW_PRESET_TRAJECTORY:
+            mode_msg.data = "FOLLOW_PRESET_TRAJECTORY";
+            break;
+        case STATION_KEEPING:
+            mode_msg.data = "STATION_KEEPING";
+            break;
+        case ADAPTIVE_ASSISTED_RETURN:
+            mode_msg.data = "ADAPTIVE_ASSISTED_RETURN";
+            break;
+        default:
+            mode_msg.data = "UNKNOWN";
+    }
+    operational_mode_pub->publish(mode_msg);
+
+    // Publish thruster health
+    std_msgs::msg::Float64MultiArray thruster_health_msg;
+    thruster_health_msg.data.resize(4);
+    if (iteration_count >= fault_trigger) {
+        switch (FAULT_TYPE_TO_SIMULATE) {
+            case LEFT_THRUSTER_FAULT_SIM:
+                thruster_health_msg.data[0] = (1.0 - thruster_degrade_percentage) * 100.0; // Left health %
+                thruster_health_msg.data[1] = 100.0; // Right health %
+                break;
+            case RIGHT_THRUSTER_FAULT_SIM:
+                thruster_health_msg.data[0] = 100.0; // Left health %
+                thruster_health_msg.data[1] = (1.0 - thruster_degrade_percentage) * 100.0; // Right health %
+                break;
+            default:
+                thruster_health_msg.data[0] = 100.0; // Left health %
+                thruster_health_msg.data[1] = 100.0; // Right health %
+        }
+    } else {
+        thruster_health_msg.data[0] = 100.0; // Left health %
+        thruster_health_msg.data[1] = 100.0; // Right health %
+    }
+    thruster_health_msg.data[2] = Tp_mpc; // Commanded left thrust
+    thruster_health_msg.data[3] = Ts_mpc; // Commanded right thrust
+    thruster_health_pub->publish(thruster_health_msg);
+
+    // Publish environmental assistance status
+    std_msgs::msg::Float64MultiArray env_assist_msg;
+    env_assist_msg.data.resize(6);
+    env_assist_msg.data[0] = environmental_assistance.surge_assistance_factor;
+    env_assist_msg.data[1] = environmental_assistance.sway_assistance_factor;
+    env_assist_msg.data[2] = environmental_assistance.yaw_assistance_factor;
+    env_assist_msg.data[3] = esti_x[6]; // Current w_x
+    env_assist_msg.data[4] = esti_x[7]; // Current w_y
+    env_assist_msg.data[5] = esti_x[8]; // Current w_psi
+    environmental_assistance_pub->publish(env_assist_msg);
+
+    // Publish planning status (only if in adaptive mode and plan is valid)
+    if (current_mode == ADAPTIVE_ASSISTED_RETURN && current_plan.is_valid) {
+        std_msgs::msg::Float64MultiArray planning_msg;
+        planning_msg.data.resize(6);
+        planning_msg.data[0] = current_plan.selected_harbor_zone;
+        planning_msg.data[1] = current_plan.target_point.x();
+        planning_msg.data[2] = current_plan.target_point.y();
+        planning_msg.data[3] = current_plan.path_distance;
+        planning_msg.data[4] = current_plan.feasibility_score;
+        planning_msg.data[5] = current_plan.obstacle_free ? 1.0 : 0.0;
+        planning_status_pub->publish(planning_msg);
+    }
+
+    // Publish enhanced USV state for map visualization
+    geometry_msgs::msg::PoseStamped usv_state_msg;
+    usv_state_msg.header.stamp = rclcpp::Clock().now();
+    usv_state_msg.header.frame_id = "odom_frame";
+    usv_state_msg.pose.position.x = local_pos.x;
+    usv_state_msg.pose.position.y = local_pos.y;
+    usv_state_msg.pose.position.z = 0.0;
+
+    // Convert continuous yaw to quaternion
+    tf2::Quaternion usv_quat;
+    usv_quat.setRPY(0, 0, local_pos.psi);
+    geometry_msgs::msg::Quaternion usv_quat_msg;
+    tf2::convert(usv_quat, usv_quat_msg);
+    usv_state_msg.pose.orientation = usv_quat_msg;
+    usv_state_pub->publish(usv_state_msg);
 
     if(cout_counter > 2){
         std::cout << "---------------------------------------------------------------------------------------------------------------------" << std::endl;
