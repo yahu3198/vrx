@@ -223,6 +223,8 @@ class WAMV_MPC : public rclcpp::Node
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr usv_state_pub;
     rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr environmental_assistance_pub;
     rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr planning_status_pub;
+    rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr prediction_metrics_pub;
+    rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr learned_features_pub;
     // rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr harbor_zones_pub; // For static data
 
     // Trajectory variables
@@ -442,6 +444,312 @@ class WAMV_MPC : public rclcpp::Node
             mae_2s_wx(0), mae_2s_wy(0), mae_2s_wpsi(0),
             validation_samples(0), validation_ready(false) {}
     };
+
+    struct DataDrivenEnvironmentalPredictor {
+        // Feature extraction from force history
+        struct Features {
+            double mean_magnitude;      // Average force magnitude
+            double dominant_frequency;  // From FFT analysis
+            double variance;            // Force variability
+            double trend_x;            // Recent trend in x
+            double trend_y;            // Recent trend in y
+            double trend_yaw;          // Recent trend in yaw
+            double phase_estimate;     // Estimated position in oscillation
+            
+            Eigen::VectorXd toVector() const {
+                Eigen::VectorXd vec(7);
+                vec << mean_magnitude, dominant_frequency, variance, 
+                       trend_x, trend_y, trend_yaw, phase_estimate;
+                return vec;
+            }
+        };
+        
+        // RLS parameters for online learning
+        struct RLSModel {
+            Eigen::MatrixXd P;          // Covariance matrix (7x7)
+            Eigen::MatrixXd theta;      // Parameter matrix (7x3) - CHANGED! maps features to forces
+            double lambda = 0.98;       
+            double regularization = 0.01;
+            bool initialized = false;
+            
+            void initialize() {
+                P = Eigen::MatrixXd::Identity(7, 7) * 100.0;
+                theta = Eigen::MatrixXd::Zero(7, 3);  // CHANGED from (3, 7) to (7, 3)
+                initialized = true;
+            }
+            
+            void update(const Eigen::VectorXd& features, const Eigen::Vector3d& forces) {
+                if (!initialized) initialize();
+                
+                // RLS update equations - FIXED
+                Eigen::Vector3d y_pred = theta.transpose() * features;  // (3x7) * (7x1) = (3x1)
+                Eigen::Vector3d error = forces - y_pred;
+                
+                // Kalman gain
+                double denominator = lambda + features.transpose() * P * features;
+                Eigen::MatrixXd K = P * features / denominator;  // (7x7) * (7x1) / scalar = (7x1)
+                
+                // Update parameters
+                theta = theta + K * error.transpose();  // (7x3) + (7x1) * (1x3) = (7x3)
+                
+                // Update covariance
+                P = (P - K * features.transpose() * P) / lambda;  // (7x7)
+                
+                // Add regularization
+                P += Eigen::MatrixXd::Identity(7, 7) * regularization;
+            }
+        };
+
+        // Historical data management
+        struct HistoryBuffer {
+            std::deque<Eigen::Vector3d> forces;
+            std::deque<double> timestamps;
+            std::deque<double> headings;
+            std::deque<Eigen::Vector2d> velocities;
+            static constexpr size_t MAX_SIZE = 200;  // 10 seconds at 20Hz
+            
+            void add(const Eigen::Vector3d& force, double time, double heading, const Eigen::Vector2d& vel) {
+                forces.push_back(force);
+                timestamps.push_back(time);
+                headings.push_back(heading);
+                velocities.push_back(vel);
+                
+                while (forces.size() > MAX_SIZE) {
+                    forces.pop_front();
+                    timestamps.pop_front();
+                    headings.pop_front();
+                    velocities.pop_front();
+                }
+            }
+            
+            bool hasEnoughData() const {
+                return forces.size() >= 40;  // Need at least 2 seconds
+            }
+        };
+        
+        // FFT for frequency analysis
+        struct SpectralAnalyzer {
+            double findDominantFrequency(const std::deque<Eigen::Vector3d>& forces, 
+                                        const std::deque<double>& timestamps) {
+                if (forces.size() < 20) return 0.0;
+                
+                // Simple peak detection in force magnitude
+                std::vector<double> magnitudes;
+                for (const auto& f : forces) {
+                    magnitudes.push_back(f.norm());
+                }
+                
+                // Count zero crossings to estimate frequency
+                double mean = std::accumulate(magnitudes.begin(), magnitudes.end(), 0.0) / magnitudes.size();
+                int crossings = 0;
+                for (size_t i = 1; i < magnitudes.size(); ++i) {
+                    if ((magnitudes[i-1] - mean) * (magnitudes[i] - mean) < 0) {
+                        crossings++;
+                    }
+                }
+                
+                double time_span = timestamps.back() - timestamps.front();
+                return crossings / (2.0 * time_span);  // Frequency in Hz
+            }
+            
+            double estimatePhase(const std::deque<Eigen::Vector3d>& forces, double frequency) {
+                if (frequency < 0.01 || forces.empty()) return 0.0;
+                
+                // Estimate current phase based on recent force pattern
+                double current_magnitude = forces.back().norm();
+                double mean_magnitude = 0.0;
+                for (const auto& f : forces) {
+                    mean_magnitude += f.norm();
+                }
+                mean_magnitude /= forces.size();
+                
+                // Simple phase estimate based on deviation from mean
+                double normalized = (current_magnitude - mean_magnitude) / (mean_magnitude + 0.01);
+                return asin(std::max(-1.0, std::min(1.0, normalized)));
+            }
+        };
+        
+        // Main components
+        RLSModel rls_model;
+        HistoryBuffer history;
+        SpectralAnalyzer spectral;
+        Features current_features;
+        
+        // Confidence tracking
+        double prediction_confidence = 0.0;
+        std::deque<double> recent_errors;
+        static constexpr size_t ERROR_HISTORY_SIZE = 20;
+        
+        // Extract features from current history
+        Features extractFeatures() {
+            Features feat;
+            
+            if (!history.hasEnoughData()) {
+                return feat;  // Return zeros if not enough data
+            }
+            
+            // Calculate mean magnitude
+            feat.mean_magnitude = 0.0;
+            for (const auto& f : history.forces) {
+                feat.mean_magnitude += f.norm();
+            }
+            feat.mean_magnitude /= history.forces.size();
+            
+            // Find dominant frequency
+            feat.dominant_frequency = spectral.findDominantFrequency(history.forces, history.timestamps);
+            
+            // Calculate variance
+            feat.variance = 0.0;
+            for (const auto& f : history.forces) {
+                double diff = f.norm() - feat.mean_magnitude;
+                feat.variance += diff * diff;
+            }
+            feat.variance /= history.forces.size();
+            feat.variance = sqrt(feat.variance);
+            
+            // Calculate recent trends (last 1 second)
+            size_t trend_points = std::min(size_t(20), history.forces.size());
+            if (trend_points >= 2) {
+                double dt = history.timestamps.back() - history.timestamps[history.forces.size() - trend_points];
+                if (dt > 0) {
+                    Eigen::Vector3d recent_change = history.forces.back() - 
+                                                   history.forces[history.forces.size() - trend_points];
+                    feat.trend_x = recent_change.x() / dt;
+                    feat.trend_y = recent_change.y() / dt;
+                    feat.trend_yaw = recent_change.z() / dt;
+                }
+            }
+            
+            // Estimate phase
+            feat.phase_estimate = spectral.estimatePhase(history.forces, feat.dominant_frequency);
+            
+            return feat;
+        }
+        
+        // Main prediction function
+        Eigen::Vector3d predict(double horizon_seconds) {
+            // Clamp prediction horizon
+            horizon_seconds = std::min(3.0, std::max(0.0, horizon_seconds));
+            
+            if (!history.hasEnoughData() || !rls_model.initialized) {
+                // Fallback to simple decay if not enough data
+                if (!history.forces.empty()) {
+                    return history.forces.back() * exp(-0.25 * horizon_seconds);
+                }
+                return Eigen::Vector3d::Zero();
+            }
+            
+            // Extract current features
+            Features feat = extractFeatures();
+            Eigen::VectorXd feature_vec = feat.toVector();
+            
+            // Evolve features forward in time
+            Eigen::VectorXd evolved_features = evolveFeatures(feature_vec, horizon_seconds);
+            
+            // Use RLS model for prediction
+            Eigen::Vector3d predicted = rls_model.theta.transpose() * evolved_features;
+            
+            // Apply confidence-based scaling
+            double confidence_scale = calculateConfidenceScale(horizon_seconds);
+            predicted *= confidence_scale;
+            
+            // Enforce physical constraints
+            double max_force = 100.0;  // N - reasonable maximum
+            for (int i = 0; i < 3; ++i) {
+                predicted(i) = std::max(-max_force, std::min(max_force, predicted(i)));
+            }
+            
+            return predicted;
+        }
+        
+        // Update model with new observation
+        void update(const Eigen::Vector3d& measured_forces, double current_time, 
+                   double heading, const Eigen::Vector2d& velocity) {
+            // Add to history
+            history.add(measured_forces, current_time, heading, velocity);
+            
+            if (!history.hasEnoughData()) {
+                return;  // Wait for more data
+            }
+            
+            // Extract features
+            current_features = extractFeatures();
+            
+            // Update RLS model
+            rls_model.update(current_features.toVector(), measured_forces);
+            
+            // Track prediction errors for confidence estimation
+            if (history.forces.size() >= 21) {  // Can check 1-second-ago prediction
+                Eigen::Vector3d predicted_before = predict(1.0);
+                Eigen::Vector3d actual = history.forces.back();
+                double error = (predicted_before - actual).norm();
+                
+                recent_errors.push_back(error);
+                while (recent_errors.size() > ERROR_HISTORY_SIZE) {
+                    recent_errors.pop_front();
+                }
+                
+                // Update confidence based on recent performance
+                if (recent_errors.size() >= 10) {
+                    double mean_error = std::accumulate(recent_errors.begin(), 
+                                                       recent_errors.end(), 0.0) / recent_errors.size();
+                    prediction_confidence = exp(-mean_error / 30.0);  // Increased denominator from 20.0
+                    prediction_confidence = std::max(0.2, prediction_confidence); // Set minimum floor
+                }
+            }
+        }
+        
+        // Get prediction uncertainty
+        Eigen::Matrix3d getPredictionCovariance(double horizon_seconds) {
+            double base_uncertainty = 2.0;  // REDUCED from 5.0
+            
+            if (!recent_errors.empty()) {
+                base_uncertainty = std::min(5.0,  // Cap maximum
+                    std::accumulate(recent_errors.begin(), 
+                                  recent_errors.end(), 0.0) / recent_errors.size());
+            }
+            
+            // More conservative growth
+            double uncertainty = base_uncertainty * (1.0 + 0.5 * horizon_seconds); // Reduced from quadratic
+            return Eigen::Matrix3d::Identity() * uncertainty * uncertainty;
+        }
+        
+    private:
+        // Evolve features forward in time
+        Eigen::VectorXd evolveFeatures(const Eigen::VectorXd& current, double dt) {
+            Eigen::VectorXd evolved = current;
+            
+            // Phase evolves based on frequency
+            if (current(1) > 0.01) {  // If there's a dominant frequency
+                evolved(6) = fmod(current(6) + 2.0 * M_PI * current(1) * dt, 2.0 * M_PI);
+            }
+            
+            // Trends decay over time
+            double trend_decay = exp(-dt / 2.0);  // 2-second decay constant
+            evolved(3) *= trend_decay;  // trend_x
+            evolved(4) *= trend_decay;  // trend_y
+            evolved(5) *= trend_decay;  // trend_yaw
+            
+            // Variance typically decreases with averaging
+            evolved(2) *= sqrt(1.0 + dt);  // variance increases with uncertainty
+            
+            return evolved;
+        }
+        
+        // Calculate confidence-based scaling factor
+        double calculateConfidenceScale(double horizon_seconds) {
+            // Start with time-based decay
+            double time_decay = exp(-horizon_seconds / 3.0);  // 3-second decay constant
+            
+            // Modify based on prediction confidence
+            double confidence_factor = 0.5 + 0.5 * prediction_confidence;
+            
+            // Combine factors
+            return time_decay * confidence_factor;
+        }
+    };
+
+    DataDrivenEnvironmentalPredictor env_predictor;   
     
     PredictionValidation pred_validation;
     static const int VALIDATION_HISTORY_SIZE = 60;  // 3 seconds at 20Hz
@@ -488,11 +796,9 @@ class WAMV_MPC : public rclcpp::Node
     void updateEnvironmentalAssistance();
     void adaptMPCWeights();
 
-    void initializeTrendPrediction();
-    Vector3d predictWithDecay(double prediction_time_seconds);
-    void updateValidationData();
-    void computePredictionMetrics();
-    void fillMPCHorizonWithPrediction();
+    void updateEnvironmentalPrediction();
+    void validatePredictions();
+    void publishPredictionMetrics();
     Vector3d transformBodyToInertial(const Vector3d& forces_body, double heading);
 };
 

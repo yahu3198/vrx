@@ -74,6 +74,12 @@ WAMV_MPC::WAMV_MPC()
     planning_status_pub = this->create_publisher<std_msgs::msg::Float64MultiArray>(
         "/wamv/planning_status", 10);
 
+    prediction_metrics_pub = this->create_publisher<std_msgs::msg::Float64MultiArray>(
+        "/wamv/prediction_metrics", 10);
+    
+    learned_features_pub = this->create_publisher<std_msgs::msg::Float64MultiArray>(
+        "/wamv/learned_features", 10);
+
     // harbor_zones_pub = this->create_publisher<std_msgs::msg::Float64MultiArray>(
         // "/wamv/harbor_zones", 1); // Low frequency for static data
 
@@ -169,7 +175,8 @@ WAMV_MPC::WAMV_MPC()
     adaptive_weights.thruster_penalty_factor = 1.0;
     adaptive_weights.fault_compensation_gain = 0.0;
 
-    initializeTrendPrediction();
+    // initializeTrendPrediction();
+    env_predictor.rls_model.initialize();
 }
 
 // subscribe pos and vel
@@ -403,9 +410,8 @@ void WAMV_MPC::solve()
     ocp_nlp_constraints_model_set(mpc_capsule->nlp_config,mpc_capsule->nlp_dims,mpc_capsule->nlp_in, 0, "ubx", acados_in.x0);
 
     // Update environmental assistance before MPC solve
-    updateEnvironmentalAssistance();
-    updateValidationData();           // New: collect validation data
-    fillMPCHorizonWithPrediction();   // New: fill MPC horizon
+    updateEnvironmentalPrediction();
+    validatePredictions();           // New: collect validation data
     adaptMPCWeights();
 
     // set parameters
@@ -424,19 +430,14 @@ void WAMV_MPC::solve()
         }
     }
 
-    double params[7] = {
-        solver_param.Tp_pre, 
-        solver_param.Ts_pre,
-        esti_x[6] * environmental_assistance.surge_assistance_factor,
-        esti_x[7] * environmental_assistance.sway_assistance_factor,
-        esti_x[8] * environmental_assistance.yaw_assistance_factor,   // w_psi - environmental moment in yaw
-        health_Tp,
-        health_Ts
-    };
+    // Update parameters for each horizon point
     for (int i = 0; i <= WAMV_N; i++) {
-        for (int j = 0; j < 7; j++) {  // CHANGE: from 2 to 5
-            acados_param[i][j] = params[j];
-        }
+        acados_param[i][0] = solver_param.Tp_pre;
+        acados_param[i][1] = solver_param.Ts_pre;
+        // acados_param[i][2], [3], [4] already set by updateEnvironmentalPrediction()
+        acados_param[i][5] = health_Tp;
+        acados_param[i][6] = health_Ts;
+        
         wamv_acados_update_params(mpc_capsule, i, acados_param[i], WAMV_NP);
     }
 
@@ -724,6 +725,10 @@ void WAMV_MPC::publish_cin(double Tp_mpc, double Ts_mpc)
     usv_state_msg.pose.orientation = usv_quat_msg;
     usv_state_pub->publish(usv_state_msg);
 
+    if (env_predictor.history.hasEnoughData()) {
+        publishPredictionMetrics();
+    }
+
     if(cout_counter > 2){
         std::cout << "---------------------------------------------------------------------------------------------------------------------" << std::endl;
         // ENHANCED: Add operational mode status line
@@ -753,36 +758,32 @@ void WAMV_MPC::publish_cin(double Tp_mpc, double Ts_mpc)
         std::cout << "solve_time: "<< acados_out.cpu_time << "\tkkt_res: " << acados_out.kkt_res << "\tacados_status: " << acados_out.status << std::endl;
         std::cout << "relative_time: " << std::fixed << (current_time - start_time) << std::endl;
         // NEW: Environmental prediction validation output
-        if (pred_validation.validation_ready) {
-            // Overall metrics first
-            std::cout << "PREDICTION RMSE (overall): 0.5s=" << std::fixed << std::setprecision(2) 
-                     << pred_validation.rmse_0_5s_overall << " | 1s=" << pred_validation.rmse_1s_overall 
-                     << " | 2s=" << pred_validation.rmse_2s_overall << " | samples=" << pred_validation.validation_samples << std::endl;
+        if (env_predictor.history.hasEnoughData()) {
+            std::cout << "ENVIRONMENTAL LEARNING:" << std::endl;
+            std::cout << "  RLS Confidence: " << std::fixed << std::setprecision(2) 
+                     << env_predictor.prediction_confidence * 100.0 << "%" << std::endl;
             
-            // Component-wise breakdown
-            std::cout << "PREDICTION RMSE (wx):      0.5s=" << pred_validation.rmse_0_5s_wx 
-                     << " | 1s=" << pred_validation.rmse_1s_wx 
-                     << " | 2s=" << pred_validation.rmse_2s_wx << std::endl;
-            std::cout << "PREDICTION RMSE (wy):      0.5s=" << pred_validation.rmse_0_5s_wy 
-                     << " | 1s=" << pred_validation.rmse_1s_wy 
-                     << " | 2s=" << pred_validation.rmse_2s_wy << std::endl;
-            std::cout << "PREDICTION RMSE (wpsi):    0.5s=" << pred_validation.rmse_0_5s_wpsi 
-                     << " | 1s=" << pred_validation.rmse_1s_wpsi 
-                     << " | 2s=" << pred_validation.rmse_2s_wpsi << std::endl;
+            std::cout << "  Detected Pattern: freq=" << std::setprecision(3) 
+                     << env_predictor.current_features.dominant_frequency << "Hz"
+                     << " | mean_force=" << env_predictor.current_features.mean_magnitude << "N"
+                     << " | variance=" << env_predictor.current_features.variance << "N" << std::endl;
             
-            // Show current environmental state vs predictions (still in body frame for clarity)
-            Vector3d current_env(esti_x[6], esti_x[7], esti_x[8]);
-            Vector3d pred_1s = predictWithDecay(1.0);
-            Vector3d pred_2s = predictWithDecay(2.0);
+            // Show predictions at different horizons
+            Eigen::Vector3d pred_0_5s = env_predictor.predict(0.5);
+            Eigen::Vector3d pred_1s = env_predictor.predict(1.0);
+            Eigen::Vector3d pred_2s = env_predictor.predict(2.0);
             
-            std::cout << "ENV FORCES (body): current=(" << std::setprecision(1) << current_env.x() 
-                     << "," << current_env.y() << "," << current_env.z() << ")" << std::endl;
-            std::cout << "                   pred_1s=(" << pred_1s.x() << "," << pred_1s.y() 
-                     << "," << pred_1s.z() << ") | pred_2s=(" << pred_2s.x() 
-                     << "," << pred_2s.y() << "," << pred_2s.z() << ")" << std::endl;
+            std::cout << "  Predictions [x,y,psi]:" << std::endl;
+            std::cout << "    0.5s: [" << pred_0_5s.transpose() << "]" << std::endl;
+            std::cout << "    1.0s: [" << pred_1s.transpose() << "]" << std::endl;
+            std::cout << "    2.0s: [" << pred_2s.transpose() << "]" << std::endl;
+            
+            // Show uncertainty
+            Eigen::Matrix3d cov_1s = env_predictor.getPredictionCovariance(1.0);
+            std::cout << "  1s Uncertainty (σ): " << sqrt(cov_1s.trace()/3.0) << "N" << std::endl;
         } else {
-            std::cout << "COMPONENT-WISE PREDICTION: warming up (" << pred_validation.predicted_0_5s_body.size() 
-                     << "/40 samples needed)" << std::endl;
+            std::cout << "ENVIRONMENTAL LEARNING: Collecting data (" 
+                     << env_predictor.history.forces.size() << "/40 samples)" << std::endl;
         }
         std::cout << fault_color << "FAULT STATUS: " << fault_status;
         if (fault_detected) {
@@ -1859,250 +1860,7 @@ void WAMV_MPC::adaptMPCWeights() {
     }
 }
 
-void WAMV_MPC::initializeTrendPrediction() {
-    prev_forces_initialized = false;
-    prev_env_forces.setZero();
-    prediction_dt = 0.05;  // 20Hz control rate
-    
-    // Clear validation data
-    pred_validation = PredictionValidation();
-    
-    RCLCPP_INFO(this->get_logger(), "Trend-aware environmental prediction initialized");
-}
 
-Vector3d WAMV_MPC::predictWithDecay(double prediction_time_seconds) {
-    Vector3d current_forces_body(esti_x[6], esti_x[7], esti_x[8]);
-    double current_psi = local_pos.psi;
-    
-    // Transform current body frame forces to inertial frame
-    Matrix2d R_body_to_inertial;
-    R_body_to_inertial << cos(current_psi), -sin(current_psi),
-                          sin(current_psi),  cos(current_psi);
-    
-    Vector2d forces_xy_body(current_forces_body.x(), current_forces_body.y());
-    Vector2d forces_xy_inertial = R_body_to_inertial * forces_xy_body;
-    
-    // Apply exponential decay in inertial frame (environmental forces are consistent in inertial frame)
-    double decay_factor = exp(-prediction_time_seconds / 4.0);  // 4-second decay constant
-    Vector2d predicted_xy_inertial = forces_xy_inertial * decay_factor;
-    double predicted_wpsi = current_forces_body.z() * decay_factor;  // w_psi is scalar (yaw moment)
-    
-    // Predict USV heading at future time
-    double predicted_psi = current_psi + local_pos.r * prediction_time_seconds;
-    
-    // Transform predicted inertial forces back to body frame at predicted heading
-    Matrix2d R_inertial_to_body;
-    R_inertial_to_body << cos(predicted_psi), sin(predicted_psi),
-                         -sin(predicted_psi), cos(predicted_psi);
-    
-    Vector2d predicted_xy_body = R_inertial_to_body * predicted_xy_inertial;
-    
-    return Vector3d(predicted_xy_body.x(), predicted_xy_body.y(), predicted_wpsi);
-}
-
-void WAMV_MPC::updateValidationData() {
-    Vector3d current_forces(esti_x[6], esti_x[7], esti_x[8]);
-    double current_time = rclcpp::Clock(RCL_SYSTEM_TIME).now().seconds() - start_time;
-    double current_heading = local_pos.psi;
-    
-    // Store current predictions in body frame
-    pred_validation.predicted_0_5s_body.push_back(predictWithDecay(0.5));
-    pred_validation.predicted_1s_body.push_back(predictWithDecay(1.0));
-    pred_validation.predicted_2s_body.push_back(predictWithDecay(2.0));
-    
-    // Store actual forces and corresponding heading
-    pred_validation.actual_forces_body.push_back(current_forces);
-    pred_validation.actual_headings.push_back(current_heading);
-    pred_validation.timestamps.push_back(current_time);
-    
-    // Store heading when prediction was made (for frame correction)
-    pred_validation.prediction_headings.push_back(current_heading);
-    
-    // Maintain buffer size
-    if (pred_validation.predicted_0_5s_body.size() > VALIDATION_HISTORY_SIZE) {
-        pred_validation.predicted_0_5s_body.pop_front();
-        pred_validation.predicted_1s_body.pop_front();
-        pred_validation.predicted_2s_body.pop_front();
-        pred_validation.actual_forces_body.pop_front();
-        pred_validation.prediction_headings.pop_front();
-        pred_validation.actual_headings.pop_front();
-        pred_validation.timestamps.pop_front();
-    }
-    
-    // Enable validation after collecting enough data
-    if (pred_validation.predicted_0_5s_body.size() >= 40 && !pred_validation.validation_ready) {
-        pred_validation.validation_ready = true;
-        RCLCPP_INFO(this->get_logger(), "Frame-aware prediction validation ready");
-    }
-    
-    // Compute metrics every 10 samples
-    if (pred_validation.validation_ready && pred_validation.predicted_0_5s_body.size() % 10 == 0) {
-        computePredictionMetrics();
-    }
-}
-
-void WAMV_MPC::computePredictionMetrics() {
-    if (!pred_validation.validation_ready) return;
-    
-    size_t buffer_size = pred_validation.predicted_0_5s_body.size();
-    
-    // Validation indices (predictions made N steps ago vs current actual)
-    int idx_0_5s = buffer_size - 10;  // 0.5 seconds ago
-    int idx_1s = buffer_size - 20;    // 1 second ago  
-    int idx_2s = buffer_size - 40;    // 2 seconds ago
-    
-    if (idx_2s >= 0) {  // Ensure sufficient data
-        Vector3d actual_now_body = pred_validation.actual_forces_body.back();
-        double actual_heading_now = pred_validation.actual_headings.back();
-        
-        // Transform current actual forces to inertial frame
-        Vector3d actual_now_inertial = transformBodyToInertial(actual_now_body, actual_heading_now);
-        
-        // Process 0.5s prediction
-        Vector3d pred_0_5s_body = pred_validation.predicted_0_5s_body[idx_0_5s];
-        double pred_0_5s_heading = pred_validation.prediction_headings[idx_0_5s];
-        Vector3d pred_0_5s_inertial = transformBodyToInertial(pred_0_5s_body, pred_0_5s_heading);
-        
-        // Process 1s prediction
-        Vector3d pred_1s_body = pred_validation.predicted_1s_body[idx_1s];
-        double pred_1s_heading = pred_validation.prediction_headings[idx_1s];
-        Vector3d pred_1s_inertial = transformBodyToInertial(pred_1s_body, pred_1s_heading);
-        
-        // Process 2s prediction
-        Vector3d pred_2s_body = pred_validation.predicted_2s_body[idx_2s];
-        double pred_2s_heading = pred_validation.prediction_headings[idx_2s];
-        Vector3d pred_2s_inertial = transformBodyToInertial(pred_2s_body, pred_2s_heading);
-        
-        // Calculate component-wise errors in inertial frame
-        Vector3d error_0_5s = pred_0_5s_inertial - actual_now_inertial;
-        Vector3d error_1s = pred_1s_inertial - actual_now_inertial;
-        Vector3d error_2s = pred_2s_inertial - actual_now_inertial;
-        
-        // Component-wise absolute errors (instantaneous)
-        double abs_error_0_5s_wx = std::abs(error_0_5s.x());
-        double abs_error_0_5s_wy = std::abs(error_0_5s.y());
-        double abs_error_0_5s_wpsi = std::abs(error_0_5s.z());
-        
-        double abs_error_1s_wx = std::abs(error_1s.x());
-        double abs_error_1s_wy = std::abs(error_1s.y());
-        double abs_error_1s_wpsi = std::abs(error_1s.z());
-        
-        double abs_error_2s_wx = std::abs(error_2s.x());
-        double abs_error_2s_wy = std::abs(error_2s.y());
-        double abs_error_2s_wpsi = std::abs(error_2s.z());
-        
-        // Overall RMSE (vector norm)
-        double rmse_0_5s_overall_new = error_0_5s.norm();
-        double rmse_1s_overall_new = error_1s.norm();
-        double rmse_2s_overall_new = error_2s.norm();
-        
-        // Exponential moving average update
-        double alpha = 0.15;  // Smoothing factor
-        
-        if (pred_validation.validation_samples == 0) {
-            // Initialize on first sample
-            pred_validation.rmse_0_5s_wx = abs_error_0_5s_wx;
-            pred_validation.rmse_0_5s_wy = abs_error_0_5s_wy;
-            pred_validation.rmse_0_5s_wpsi = abs_error_0_5s_wpsi;
-            
-            pred_validation.rmse_1s_wx = abs_error_1s_wx;
-            pred_validation.rmse_1s_wy = abs_error_1s_wy;
-            pred_validation.rmse_1s_wpsi = abs_error_1s_wpsi;
-            
-            pred_validation.rmse_2s_wx = abs_error_2s_wx;
-            pred_validation.rmse_2s_wy = abs_error_2s_wy;
-            pred_validation.rmse_2s_wpsi = abs_error_2s_wpsi;
-            
-            pred_validation.rmse_0_5s_overall = rmse_0_5s_overall_new;
-            pred_validation.rmse_1s_overall = rmse_1s_overall_new;
-            pred_validation.rmse_2s_overall = rmse_2s_overall_new;
-            
-            // Initialize MAE (same as RMSE for absolute errors)
-            pred_validation.mae_0_5s_wx = abs_error_0_5s_wx;
-            pred_validation.mae_0_5s_wy = abs_error_0_5s_wy;
-            pred_validation.mae_0_5s_wpsi = abs_error_0_5s_wpsi;
-            
-            pred_validation.mae_1s_wx = abs_error_1s_wx;
-            pred_validation.mae_1s_wy = abs_error_1s_wy;
-            pred_validation.mae_1s_wpsi = abs_error_1s_wpsi;
-            
-            pred_validation.mae_2s_wx = abs_error_2s_wx;
-            pred_validation.mae_2s_wy = abs_error_2s_wy;
-            pred_validation.mae_2s_wpsi = abs_error_2s_wpsi;
-        } else {
-            // Running average update for component-wise RMSE
-            pred_validation.rmse_0_5s_wx = alpha * abs_error_0_5s_wx + (1.0 - alpha) * pred_validation.rmse_0_5s_wx;
-            pred_validation.rmse_0_5s_wy = alpha * abs_error_0_5s_wy + (1.0 - alpha) * pred_validation.rmse_0_5s_wy;
-            pred_validation.rmse_0_5s_wpsi = alpha * abs_error_0_5s_wpsi + (1.0 - alpha) * pred_validation.rmse_0_5s_wpsi;
-            
-            pred_validation.rmse_1s_wx = alpha * abs_error_1s_wx + (1.0 - alpha) * pred_validation.rmse_1s_wx;
-            pred_validation.rmse_1s_wy = alpha * abs_error_1s_wy + (1.0 - alpha) * pred_validation.rmse_1s_wy;
-            pred_validation.rmse_1s_wpsi = alpha * abs_error_1s_wpsi + (1.0 - alpha) * pred_validation.rmse_1s_wpsi;
-            
-            pred_validation.rmse_2s_wx = alpha * abs_error_2s_wx + (1.0 - alpha) * pred_validation.rmse_2s_wx;
-            pred_validation.rmse_2s_wy = alpha * abs_error_2s_wy + (1.0 - alpha) * pred_validation.rmse_2s_wy;
-            pred_validation.rmse_2s_wpsi = alpha * abs_error_2s_wpsi + (1.0 - alpha) * pred_validation.rmse_2s_wpsi;
-            
-            // Overall RMSE update
-            pred_validation.rmse_0_5s_overall = alpha * rmse_0_5s_overall_new + (1.0 - alpha) * pred_validation.rmse_0_5s_overall;
-            pred_validation.rmse_1s_overall = alpha * rmse_1s_overall_new + (1.0 - alpha) * pred_validation.rmse_1s_overall;
-            pred_validation.rmse_2s_overall = alpha * rmse_2s_overall_new + (1.0 - alpha) * pred_validation.rmse_2s_overall;
-            
-            // MAE update (for component-wise, MAE = RMSE since we use absolute values)
-            pred_validation.mae_0_5s_wx = pred_validation.rmse_0_5s_wx;
-            pred_validation.mae_0_5s_wy = pred_validation.rmse_0_5s_wy;
-            pred_validation.mae_0_5s_wpsi = pred_validation.rmse_0_5s_wpsi;
-            
-            pred_validation.mae_1s_wx = pred_validation.rmse_1s_wx;
-            pred_validation.mae_1s_wy = pred_validation.rmse_1s_wy;
-            pred_validation.mae_1s_wpsi = pred_validation.rmse_1s_wpsi;
-            
-            pred_validation.mae_2s_wx = pred_validation.rmse_2s_wx;
-            pred_validation.mae_2s_wy = pred_validation.rmse_2s_wy;
-            pred_validation.mae_2s_wpsi = pred_validation.rmse_2s_wpsi;
-        }
-        
-        pred_validation.validation_samples++;
-        
-        // Log detailed component analysis occasionally
-        if (pred_validation.validation_samples % 200 == 0) {
-            RCLCPP_INFO(this->get_logger(), 
-                       "Component Analysis - 1s prediction: wx_err=%.2f, wy_err=%.2f, wpsi_err=%.2f", 
-                       pred_validation.rmse_1s_wx, pred_validation.rmse_1s_wy, pred_validation.rmse_1s_wpsi);
-                       
-            // Identify worst performing component
-            std::string worst_component = "wx";
-            double worst_error = pred_validation.rmse_1s_wx;
-            
-            if (pred_validation.rmse_1s_wy > worst_error) {
-                worst_component = "wy";
-                worst_error = pred_validation.rmse_1s_wy;
-            }
-            
-            if (pred_validation.rmse_1s_wpsi > worst_error) {
-                worst_component = "wpsi";
-                worst_error = pred_validation.rmse_1s_wpsi;
-            }
-            
-            RCLCPP_INFO(this->get_logger(), 
-                       "Worst prediction component: %s (error=%.2f)", 
-                       worst_component.c_str(), worst_error);
-        }
-    }
-}
-
-void WAMV_MPC::fillMPCHorizonWithPrediction() {
-    // Fill MPC prediction horizon with trend-decay predictions
-    for (int i = 0; i <= WAMV_N; i++) {
-        double prediction_time = i * 0.05;  // 50ms MPC timestep
-        Vector3d predicted_forces = predictWithDecay(prediction_time);
-        
-        // Apply environmental assistance factors
-        acados_param[i][2] = predicted_forces.x() * environmental_assistance.surge_assistance_factor;
-        acados_param[i][3] = predicted_forces.y() * environmental_assistance.sway_assistance_factor;
-        acados_param[i][4] = predicted_forces.z() * environmental_assistance.yaw_assistance_factor;
-    }
-}
 
 Vector3d WAMV_MPC::transformBodyToInertial(const Vector3d& forces_body, double heading) {
     Matrix2d R_body_to_inertial;
@@ -2113,4 +1871,86 @@ Vector3d WAMV_MPC::transformBodyToInertial(const Vector3d& forces_body, double h
     Vector2d forces_xy_inertial = R_body_to_inertial * forces_xy_body;
     
     return Vector3d(forces_xy_inertial.x(), forces_xy_inertial.y(), forces_body.z());
+}
+
+void WAMV_MPC::updateEnvironmentalPrediction() {
+    // Get current state
+    Eigen::Vector3d current_forces(esti_x[6], esti_x[7], esti_x[8]);
+    Eigen::Vector2d current_velocity(local_pos.u, local_pos.v);
+    double current_time = rclcpp::Clock(RCL_SYSTEM_TIME).now().seconds() - start_time;
+    
+    // Update the predictor with new observation
+    env_predictor.update(current_forces, current_time, local_pos.psi, current_velocity);
+    
+    // Fill MPC horizon with predictions
+    for (int i = 0; i <= WAMV_N; i++) {
+        double prediction_horizon = i * 0.05;  // 50ms timestep
+        
+        // Get prediction
+        Eigen::Vector3d predicted = env_predictor.predict(prediction_horizon);
+        
+        // Apply assistance factors (only after fault)
+        if (iteration_count >= fault_trigger) {
+            // Scale by confidence
+            // double confidence = env_predictor.prediction_confidence;
+            double confidence_factor = sqrt(env_predictor.prediction_confidence);
+            confidence_factor = std::max(0.3, confidence_factor);  // Minimum 30%
+            
+            acados_param[i][2] = predicted.x() * 0.6 * confidence_factor;  // Higher base factor
+            acados_param[i][3] = predicted.y() * 0.5 * confidence_factor;
+            acados_param[i][4] = predicted.z() * 0.6 * confidence_factor;
+        } else {
+            // No assistance before fault
+            acados_param[i][2] = 0.0;
+            acados_param[i][3] = 0.0;
+            acados_param[i][4] = 0.0;
+        }
+    }
+}
+
+// Add validation metrics
+void WAMV_MPC::validatePredictions() {
+    // Only validate if we have enough history
+    if (!env_predictor.history.hasEnoughData()) return;
+    
+    // Get predictions at different horizons
+    Eigen::Vector3d pred_0_5s = env_predictor.predict(0.5);
+    Eigen::Vector3d pred_1s = env_predictor.predict(1.0);
+    // Eigen::Vector3d pred_2s = env_predictor.predict(2.0);
+    
+    // Get uncertainty estimates
+    Eigen::Matrix3d cov_1s = env_predictor.getPredictionCovariance(1.0);
+    
+    // Log or publish metrics
+    if (cout_counter > 2) {
+        std::cout << "ENV PREDICTION: Confidence=" << std::fixed << std::setprecision(2) 
+                 << env_predictor.prediction_confidence
+                 << " | Features: freq=" << env_predictor.current_features.dominant_frequency 
+                 << "Hz, var=" << env_predictor.current_features.variance << "N" << std::endl;
+        std::cout << "  Predictions: 0.5s=" << pred_0_5s.transpose() 
+                 << " | 1s=" << pred_1s.transpose() 
+                 << " | uncert_1s=" << sqrt(cov_1s.trace()) << "N" << std::endl;
+    }
+}
+
+void WAMV_MPC::publishPredictionMetrics() {
+    std_msgs::msg::Float64MultiArray metrics_msg;
+    
+    // Confidence and key features
+    metrics_msg.data.push_back(env_predictor.prediction_confidence);
+    metrics_msg.data.push_back(env_predictor.current_features.dominant_frequency);
+    metrics_msg.data.push_back(env_predictor.current_features.mean_magnitude);
+    metrics_msg.data.push_back(env_predictor.current_features.variance);
+    
+    // Predictions at different horizons
+    Eigen::Vector3d pred_1s = env_predictor.predict(1.0);
+    metrics_msg.data.push_back(pred_1s.x());
+    metrics_msg.data.push_back(pred_1s.y());
+    metrics_msg.data.push_back(pred_1s.z());
+    
+    // Uncertainty
+    Eigen::Matrix3d cov = env_predictor.getPredictionCovariance(1.0);
+    metrics_msg.data.push_back(sqrt(cov.trace()));
+    
+    prediction_metrics_pub->publish(metrics_msg);
 }
