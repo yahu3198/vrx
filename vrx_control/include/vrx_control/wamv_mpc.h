@@ -697,6 +697,25 @@ class WAMV_MPC : public rclcpp::Node
                     prediction_confidence = std::max(0.2, prediction_confidence); // Set minimum floor
                 }
             }
+            // Store current 1s prediction for future validation
+            Vector3d pred_1s = predict(1.0);
+            validation_metrics.predictions_1s_ago.push_back(pred_1s);
+            validation_metrics.timestamps_for_validation.push_back(current_time);
+            
+            // Check if we have a 1-second-old prediction to validate
+            if (validation_metrics.timestamps_for_validation.size() >= 20) { // 1s at 20Hz
+                validation_metrics.actual_forces_1s_later.push_back(measured_forces);
+                
+                // Keep buffer size manageable
+                if (validation_metrics.predictions_1s_ago.size() > 40) {
+                    validation_metrics.predictions_1s_ago.pop_front();
+                    validation_metrics.actual_forces_1s_later.pop_front();
+                    validation_metrics.timestamps_for_validation.pop_front();
+                }
+                
+                // Update RMSE calculation
+                validation_metrics.updateRMSE();
+            }
         }
         
         // Get prediction uncertainty
@@ -713,6 +732,35 @@ class WAMV_MPC : public rclcpp::Node
             double uncertainty = base_uncertainty * (1.0 + 0.5 * horizon_seconds); // Reduced from quadratic
             return Eigen::Matrix3d::Identity() * uncertainty * uncertainty;
         }
+
+        struct ValidationMetrics {
+            std::deque<Vector3d> predictions_1s_ago;
+            std::deque<Vector3d> actual_forces_1s_later;
+            std::deque<double> timestamps_for_validation;
+            double rmse_1s = 0.0;
+            int validation_count = 0;
+            
+            void updateRMSE() {
+                if (predictions_1s_ago.size() < 20) return; // Need enough samples
+                
+                double sum_squared_error = 0.0;
+                int count = 0;
+                
+                for (size_t i = 0; i < std::min(predictions_1s_ago.size(), 
+                                                actual_forces_1s_later.size()); i++) {
+                    Vector3d error = predictions_1s_ago[i] - actual_forces_1s_later[i];
+                    sum_squared_error += error.squaredNorm();
+                    count++;
+                }
+                
+                if (count > 0) {
+                    rmse_1s = sqrt(sum_squared_error / count);
+                    validation_count = count;
+                }
+            }
+        };
+        
+        ValidationMetrics validation_metrics;
         
     private:
         // Evolve features forward in time

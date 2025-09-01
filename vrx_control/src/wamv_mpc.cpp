@@ -781,6 +781,8 @@ void WAMV_MPC::publish_cin(double Tp_mpc, double Ts_mpc)
             // Show uncertainty
             Eigen::Matrix3d cov_1s = env_predictor.getPredictionCovariance(1.0);
             std::cout << "  1s Uncertainty (σ): " << sqrt(cov_1s.trace()/3.0) << "N" << std::endl;
+            std::cout << "   1s RMSE: " << env_predictor.validation_metrics.rmse_1s 
+          << "N (n=" << env_predictor.validation_metrics.validation_count << ")" << std::endl;
         } else {
             std::cout << "ENVIRONMENTAL LEARNING: Collecting data (" 
                      << env_predictor.history.forces.size() << "/40 samples)" << std::endl;
