@@ -1848,9 +1848,9 @@ void WAMV_MPC::updateEnvironmentalAssistance()
     // FAULT-ONLY assistance (your key innovation)
     if (iteration_count >= fault_trigger && environmental_assistance.is_reliable) {
         // After fault - enable environmental assistance
-        environmental_assistance.surge_assistance_factor = 0.6;
-        environmental_assistance.sway_assistance_factor = 0.6;
-        environmental_assistance.yaw_assistance_factor = 0.4;
+        environmental_assistance.surge_assistance_factor = 0.8;
+        environmental_assistance.sway_assistance_factor = 0.8;
+        environmental_assistance.yaw_assistance_factor = 0.8;
     } else {
         // Normal operation - NO environmental assistance
         environmental_assistance.surge_assistance_factor = 0.0;
@@ -1862,7 +1862,7 @@ void WAMV_MPC::updateEnvironmentalAssistance()
 void WAMV_MPC::adaptMPCWeights() {
     if (iteration_count >= fault_trigger && adaptive_weights.use_environmental_assistance) {
         // Increase psi weight during fault conditions
-        double adaptive_psi_weight = 300.0;  // Increased from original 150
+        double adaptive_psi_weight = 600.0;  // Increased from original 150
         double adaptive_u_weight = 5.0;      // Slightly increase velocity weights
         double adaptive_v_weight = 5.0;
         
