@@ -80,6 +80,9 @@ WAMV_MPC::WAMV_MPC()
     learned_features_pub = this->create_publisher<std_msgs::msg::Float64MultiArray>(
         "/wamv/learned_features", 10);
 
+    disturbance_world_pub = this->create_publisher<geometry_msgs::msg::TwistStamped>(
+        "/wamv/disturbance_world", 20);
+
     // harbor_zones_pub = this->create_publisher<std_msgs::msg::Float64MultiArray>(
         // "/wamv/harbor_zones", 1); // Low frequency for static data
 
@@ -939,6 +942,20 @@ void WAMV_MPC::EKF()
     disturbance.twist.linear.y = esti_x[7];
     disturbance.twist.angular.z = esti_x[8];
     disturbance_pub->publish(disturbance);
+
+    geometry_msgs::msg::TwistStamped disturbance_world;
+    disturbance_world.header.stamp = rclcpp::Clock().now();
+
+    // Transform to world frame for visualization
+    double psi = local_pos.psi;
+    double wx_world = cos(psi) * esti_x[6] - sin(psi) * esti_x[7];
+    double wy_world = sin(psi) * esti_x[6] + cos(psi) * esti_x[7];
+    double wpsi_world = esti_x[8];  // Yaw moment unchanged
+
+    disturbance_world.twist.linear.x = wx_world;
+    disturbance_world.twist.linear.y = wy_world;
+    disturbance_world.twist.angular.z = wpsi_world;
+    disturbance_world_pub->publish(disturbance_world);  // New publisher
     
     // H = compute_jacobian_H(x_pred);                         // compute Jacobian of measurement model at predicted state
     // y_pred = h(x_pred);                                     // predict measurement at time k+1

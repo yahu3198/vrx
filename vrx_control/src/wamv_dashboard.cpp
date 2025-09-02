@@ -129,7 +129,7 @@ WAMVDashboardNode::WAMVDashboardNode(const rclcpp::NodeOptions & options)
 {
     // Initialize ROS2 subscribers
     disturbance_sub_ = this->create_subscription<geometry_msgs::msg::TwistStamped>(
-        "/wamv/disturbance", 10,
+        "/wamv/disturbance_world", 10,  // Changed from /wamv/disturbance
         [this](const geometry_msgs::msg::TwistStamped::SharedPtr msg) {
             if (dashboard_) dashboard_->handleDisturbanceMsg(msg);
         });

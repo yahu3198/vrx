@@ -210,6 +210,7 @@ class WAMV_MPC : public rclcpp::Node
 
     rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr control_inputs_pub;
     rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr disturbance_pub;
+    rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr disturbance_world_pub;  
     rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr confidence_pub;
     
     rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr ref_pose_pub;
