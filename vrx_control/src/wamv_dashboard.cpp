@@ -644,7 +644,7 @@ void WAMVDashboard::updateHarborMapDisplay()
     double scale_factor = 10.0; // Updated to match the doubled harbor zone scaling
     double transformed_x = -usv_y_ * scale_factor;  // Apply horizontal flip
     double transformed_y = -usv_x_ * scale_factor;
-    double transformed_heading = usv_heading_ - M_PI/2; // Adjust heading for rotation
+    double transformed_heading = 3.0 * M_PI / 2.0 - usv_heading_; // Adjust heading for rotation
     
     // Update USV position and heading
     if (usv_item_) {
