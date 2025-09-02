@@ -413,6 +413,7 @@ void WAMV_MPC::solve()
     ocp_nlp_constraints_model_set(mpc_capsule->nlp_config,mpc_capsule->nlp_dims,mpc_capsule->nlp_in, 0, "ubx", acados_in.x0);
 
     // Update environmental assistance before MPC solve
+    updateEnvironmentalAssistance();
     updateEnvironmentalPrediction();
     validatePredictions();           // New: collect validation data
     adaptMPCWeights();
