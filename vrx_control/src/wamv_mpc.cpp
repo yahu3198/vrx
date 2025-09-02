@@ -749,15 +749,58 @@ void WAMV_MPC::publish_cin(double Tp_mpc, double Ts_mpc)
                     << current_plan.target_point.x() << ", " << current_plan.target_point.y() << ")";
         }
         std::cout << "\033[0m" << std::endl;
+        if (committed_zone_index >= 0) {
+            Vector2d current_pos(local_pos.x, local_pos.y);
+            double distance_to_committed = (harbor_zones[committed_zone_index].center - current_pos).norm();
+            
+            std::string commitment_status;
+            std::string commitment_color;
+            
+            if (distance_to_committed < 15.0) {
+                commitment_status = "ZONE-LOCKED";
+                commitment_color = "\033[91m";  // Bright red
+            } else if (distance_to_committed < 30.0) {
+                commitment_status = "STRONG-COMMIT";
+                commitment_color = "\033[33m";  // Yellow
+            } else if (distance_to_committed < 50.0) {
+                commitment_status = "WEAK-COMMIT";
+                commitment_color = "\033[36m";  // Cyan
+            } else {
+                commitment_status = "UNCOMMITTED";
+                commitment_color = "\033[37m";  // White
+            }
+            
+            std::cout << commitment_color << "ZONE COMMITMENT: Zone " << committed_zone_index 
+                      << " | Distance: " << std::fixed << std::setprecision(1) << distance_to_committed 
+                      << "m | Status: " << commitment_status << "\033[0m" << std::endl;
+        } else {
+            std::cout << "\033[37mZONE COMMITMENT: None (searching for best zone)\033[0m" << std::endl;
+        }
+        if (iteration_count >= fault_trigger) {
+            double actual_wx_assist = esti_x[6] * environmental_assistance.surge_assistance_factor;
+            double actual_wy_assist = esti_x[7] * environmental_assistance.sway_assistance_factor;
+            double actual_wpsi_assist = esti_x[8] * environmental_assistance.yaw_assistance_factor;
+            
+            std::cout << "\033[32mENV ASSISTANCE FACTORS: [surge: " << std::fixed << std::setprecision(2) 
+                      << environmental_assistance.surge_assistance_factor 
+                      << ", sway: " << environmental_assistance.sway_assistance_factor
+                      << ", yaw: " << environmental_assistance.yaw_assistance_factor << "]\033[0m" << std::endl;
+            
+            std::cout << "\033[32mACTUAL ENV FORCES USED: [Fx: " << std::fixed << std::setprecision(2)
+                      << actual_wx_assist << "N, Fy: " << actual_wy_assist 
+                      << "N, Mz: " << actual_wpsi_assist << "Nm]\033[0m" << std::endl;
+        } else {
+            std::cout << "\033[90mENV ASSISTANCE: Disabled (pre-fault)\033[0m" << std::endl;
+        }
         std::cout << "ref_x:    " << acados_in.yref[0][0] << "\tref_y:   " << acados_in.yref[0][1] << "\tref_yaw:    " << acados_in.yref[0][2] << std::endl;
         std::cout << "error_x:  " << error_pose.pose.pose.position.x << "  error_y:  " << error_pose.pose.pose.position.y << "  error_psi:  " << yaw_error << std::endl;
         std::cout << "pos_x:  " << local_pos.x << "  pos_y:  " << local_pos.y << "  psi:  " << yaw_sum << std::endl;
-        std::cout << "ekf pos_x:  " << esti_x[0] << "  pos_y:  " << esti_x[1] << "  psi:  " << esti_x[2] << std::endl;
-        std::cout << "vel_x:  " << local_pos.u << "  vel_y:  " << local_pos.v << "  vel_r:  " << local_pos.r << std::endl;
-        std::cout << "ekf vel_x:  " << esti_x[3] << "  vel_y:  " << esti_x[4] << "  vel_r:  " << esti_x[5] << std::endl;
+        // std::cout << "ekf pos_x:  " << esti_x[0] << "  pos_y:  " << esti_x[1] << "  psi:  " << esti_x[2] << std::endl;
+        // std::cout << "vel_x:  " << local_pos.u << "  vel_y:  " << local_pos.v << "  vel_r:  " << local_pos.r << std::endl;
+        // std::cout << "ekf vel_x:  " << esti_x[3] << "  vel_y:  " << esti_x[4] << "  vel_r:  " << esti_x[5] << std::endl;
         std::cout << "ekf w_x:  " << esti_x[6] << "  w_y:  " << esti_x[7] << "  w_psi:  " << esti_x[8] << std::endl;
         // std::cout << "calibrated w_psi: " << calibrated_wpsi << " (raw: " << esti_x[8] << ", expected: " << (Ts.data - Tp.data) * wpsi_coefficient << ")" << std::endl;
-        std::cout << "ekf acc_x:  " << ekf_acc.x << "  acc_y:  " << ekf_acc.y << "  acc_psi:  " << ekf_acc.psi << std::endl;
+        // std::cout << "ekf acc_x:  " << ekf_acc.x << "  acc_y:  " << ekf_acc.y << "  acc_psi:  " << ekf_acc.psi << std::endl;
         std::cout << "Tp:  " << acados_out.u0[0] << "  Ts:  " << acados_out.u0[1] << std::endl;
         std::cout << "solve_time: "<< acados_out.cpu_time << "\tkkt_res: " << acados_out.kkt_res << "\tacados_status: " << acados_out.status << std::endl;
         std::cout << "relative_time: " << std::fixed << (current_time - start_time) << std::endl;
@@ -1252,108 +1295,259 @@ double WAMV_MPC::calculateEnvironmentalAlignment(const Vector2d& path_direction)
 }
 
 void WAMV_MPC::fastPlanning() {
-    // Reset current plan
-    current_plan.is_valid = false;
+    // Store previous plan for comparison
+    int previous_zone = current_plan.selected_harbor_zone;
+    
+    // Reset feasibility score but keep zone commitment
     current_plan.feasibility_score = -999.0;
-    current_plan.selected_harbor_zone = -1;
     
     Vector2d current_position(local_pos.x, local_pos.y);
-    double current_heading = local_pos.psi;
+    double current_time = rclcpp::Clock(RCL_SYSTEM_TIME).now().seconds() - start_time;
     
-    // Check if we're already very close to any harbor zone
-    for (size_t zone_idx = 0; zone_idx < harbor_zones.size(); zone_idx++) {
-        const HarborZone& zone = harbor_zones[zone_idx];
-        double distance = (zone.center - current_position).norm();
+    // EMERGENCY DRIFT OVERRIDE CHECK
+    // Check if we've drifted dangerously close to a different zone
+    bool emergency_override = false;
+    int emergency_zone = -1;
+    double min_distance_to_any_zone = 999.0;
+    
+    for (int zone_idx = 0; zone_idx < 3; zone_idx++) {
+        double distance = (harbor_zones[zone_idx].center - current_position).norm();
         
-        // If very close to a zone, just target that zone
-        if (distance < 20.0) {
-            current_plan.selected_harbor_zone = zone_idx;
-            current_plan.target_point = zone.center;
-            current_plan.path_distance = distance;
-            current_plan.obstacle_free = true;
-            current_plan.feasibility_score = 200.0; // High score for close target
-            current_plan.is_valid = true;
-            
-            RCLCPP_INFO(this->get_logger(), 
-                       "Close proximity planning: Zone %zu, Distance %.1f m", 
-                       zone_idx, distance);
-            return;
+        // Track minimum distance to any zone
+        if (distance < min_distance_to_any_zone) {
+            min_distance_to_any_zone = distance;
+        }
+        
+        // Emergency: Very close to a zone that's NOT our committed zone
+        if (distance < 15.0 && zone_idx != committed_zone_index) {
+            // Check if we're closer to this zone than committed zone
+            if (committed_zone_index >= 0) {
+                double distance_to_committed = (harbor_zones[committed_zone_index].center - current_position).norm();
+                
+                // Emergency if we're much closer to different zone
+                if (distance < distance_to_committed * 0.6) {  // 40% closer to different zone
+                    emergency_override = true;
+                    emergency_zone = zone_idx;
+                    
+                    RCLCPP_WARN(this->get_logger(), 
+                               "EMERGENCY OVERRIDE: Drifted to Zone %d (%.1fm) from Zone %d (%.1fm)",
+                               zone_idx, distance, committed_zone_index, distance_to_committed);
+                    
+                    // Check collision risk with docks
+                    for (const auto& dock : dock_areas) {
+                        for (const auto& vertex : dock) {
+                            double dock_distance = (vertex - current_position).norm();
+                            if (dock_distance < 10.0) {
+                                RCLCPP_ERROR(this->get_logger(), 
+                                           "COLLISION WARNING: %.1fm from dock!", dock_distance);
+                                break;
+                            }
+                        }
+                    }
+                    break;
+                }
+            }
         }
     }
     
-    // Original planning logic for farther distances
-    // Evaluate each harbor zone
+    // EMERGENCY RESPONSE
+    if (emergency_override && emergency_zone >= 0) {
+        // Override everything - go to nearest safe point
+        committed_zone_index = emergency_zone;
+        zone_locked = true;
+        
+        // Find nearest safe point in emergency zone (NO drift compensation)
+        Vector2d emergency_target = harbor_zones[emergency_zone].center;
+        double best_distance = 999.0;
+        
+        // Try zone vertices for closest safe point
+        for (const auto& vertex : harbor_zones[emergency_zone].vertices) {
+            if (isPathObstacleFree(current_position, vertex)) {
+                double dist = (vertex - current_position).norm();
+                if (dist < best_distance) {
+                    best_distance = dist;
+                    emergency_target = vertex;
+                }
+            }
+        }
+        
+        current_plan.selected_harbor_zone = emergency_zone;
+        current_plan.target_point = emergency_target;
+        current_plan.path_distance = best_distance;
+        current_plan.obstacle_free = true;
+        current_plan.feasibility_score = 500.0;  // Maximum priority
+        current_plan.is_valid = true;
+        
+        RCLCPP_ERROR(this->get_logger(), 
+                    "EMERGENCY: Direct path to Zone %d, target (%.1f, %.1f)",
+                    emergency_zone, emergency_target.x(), emergency_target.y());
+        return;
+    }
+    
+    // STANDARD ZONE COMMITMENT LOGIC (with relaxed switching)
+    double commitment_bonus = 0.0;
+    bool allow_zone_switch = true;
+    
+    if (committed_zone_index >= 0 && committed_zone_index < 3) {
+        double distance_to_committed = (harbor_zones[committed_zone_index].center - current_position).norm();
+        
+        // RELAXED commitment thresholds
+        if (distance_to_committed < 10.0) {
+            // Very close - strong preference but CAN switch if necessary
+            allow_zone_switch = false;  // Prefer not to switch
+            zone_locked = true;
+            commitment_bonus = 150.0;  // Reduced from 200
+        } else if (distance_to_committed < 25.0) {
+            // Medium distance - allow switching with penalty
+            allow_zone_switch = true;  // Allow switching
+            zone_locked = false;
+            commitment_bonus = 50.0;   // Reduced from 100
+        } else if (distance_to_committed < 40.0) {
+            // Far - weak commitment
+            allow_zone_switch = true;
+            zone_locked = false;
+            commitment_bonus = 20.0;   // Reduced from 30
+        } else {
+            // Very far - release commitment
+            allow_zone_switch = true;
+            zone_locked = false;
+            commitment_bonus = 0.0;
+            committed_zone_index = -1;
+        }
+    }
+    
+    // ENVIRONMENTAL FORCE ANALYSIS with filtering
+    Vector3d env_forces_body = environmental_assistance.current_forces;
+    
+    // Apply low-pass filter
+    static Vector3d filtered_env_forces = Vector3d::Zero();
+    double filter_alpha = 0.3;
+    filtered_env_forces = filter_alpha * env_forces_body + (1.0 - filter_alpha) * filtered_env_forces;
+    
+    double current_psi = local_pos.psi;
+    Matrix2d R_body_to_inertial;
+    R_body_to_inertial << cos(current_psi), -sin(current_psi),
+                          sin(current_psi),  cos(current_psi);
+    
+    Vector2d env_forces_body_2d(filtered_env_forces.x(), filtered_env_forces.y());
+    Vector2d drift_estimate_inertial = R_body_to_inertial * env_forces_body_2d;
+    
+    // ZONE EVALUATION
+    double best_score = -999.0;
+    int best_zone = -1;
+    Vector2d best_target;
+    
+    // Evaluate ALL zones (don't restrict if zone_locked unless emergency)
     for (int zone_idx = 0; zone_idx < 3; zone_idx++) {
+        // Skip if zone-locked AND not in override situation
+        if (zone_locked && zone_idx != committed_zone_index && !allow_zone_switch) {
+            // But still evaluate if we're getting far from committed zone
+            double distance_to_committed = (harbor_zones[committed_zone_index].center - current_position).norm();
+            if (distance_to_committed < 20.0) {
+                continue;  // Skip only if still close to committed zone
+            }
+        }
+        
         const HarborZone& zone = harbor_zones[zone_idx];
+        double distance = (zone.center - current_position).norm();
         
-        // Calculate path to zone center
-        Vector2d path_vector = zone.center - current_position;
-        double distance = path_vector.norm();
-        
-        // Skip if zone is too close (already inside)
+        // Skip if too close
         if (distance < 5.0) {
             continue;
         }
         
-        Vector2d path_direction = path_vector.normalized();
-        double desired_heading = atan2(path_direction.y(), path_direction.x());
-        double heading_change = std::abs(desired_heading - current_heading);
+        // TARGET SELECTION
+        Vector2d target_candidate;
         
-        // Normalize heading change to [0, pi]
-        if (heading_change > M_PI) {
-            heading_change = 2.0 * M_PI - heading_change;
-        }
-        
-        // Check if path is obstacle-free
-        bool obstacle_free = isPathObstacleFree(current_position, zone.center);
-        
-        // Calculate environmental alignment
-        double env_alignment = calculateEnvironmentalAlignment(path_direction);
-        
-        // Calculate feasibility score
-        double score = 0.0;
-        
-        // Distance penalty (closer is better)
-        score += 1000.0 / (distance + 10.0);  // Max ~100 points
-        
-        // Environmental assistance bonus
-        score += env_alignment * 50.0;  // ±50 points
-        
-        // Heading change penalty
-        score -= heading_change * 30.0 / M_PI;  // 0-30 point penalty
-        
-        // Obstacle bonus/penalty
-        if (obstacle_free) {
-            score += 100.0;  // Major bonus for clear path
+        // Don't use drift compensation if very close (emergency-like situation)
+        if (distance < 20.0) {
+            // Direct path when close
+            target_candidate = zone.center;
         } else {
-            score -= 200.0;  // Major penalty for blocked path
-            continue;  // Skip blocked paths
+            // Standard drift compensation for farther distances
+            target_candidate = calculateDriftCompensatedTarget(zone, current_position, 
+                                                              drift_estimate_inertial);
         }
         
-        // Zone preference (middle zones might be better)
-        if (zone_idx == 1) score += 10.0;  // Slight preference for middle zone
+        // PATH CHECK
+        bool obstacle_free = isPathCorridorFree(current_position, target_candidate, 8.0);
         
-        // Update current_plan if this is the best option so far
-        if (score > current_plan.feasibility_score) {
-            current_plan.selected_harbor_zone = zone_idx;
-            current_plan.target_point = zone.center;
-            current_plan.path_distance = distance;
-            current_plan.required_heading_change = heading_change;
-            current_plan.environmental_alignment = env_alignment;
-            current_plan.obstacle_free = obstacle_free;
-            current_plan.feasibility_score = score;
-            current_plan.is_valid = true;
+        if (!obstacle_free) {
+            // Try alternative targets
+            target_candidate = findAlternativeTargetInZone(zone_idx, current_position);
+            obstacle_free = isPathObstacleFree(current_position, target_candidate);
+            
+            if (!obstacle_free && zone_idx != committed_zone_index) {
+                continue;  // Skip blocked non-committed zones
+            }
+        }
+        
+        // SCORE CALCULATION
+        Vector2d path_direction = (target_candidate - current_position).normalized();
+        double score = calculateZoneScore(zone_idx, target_candidate, current_position, 
+                                         path_direction, obstacle_free);
+        
+        // Commitment bonus (reduced values)
+        if (zone_idx == committed_zone_index) {
+            score += commitment_bonus;
+        }
+        
+        // Zone switching penalty (reduced to allow necessary switches)
+        if (zone_idx != previous_zone && previous_zone >= 0) {
+            score *= 0.8;  // Only 20% reduction (was 50%)
+            
+            // Time-based penalty
+            if (current_time - last_zone_switch_time < MIN_ZONE_SWITCH_INTERVAL) {
+                score *= 0.9;  // Only 10% additional reduction
+            }
+        }
+        
+        // Update best option
+        if (score > best_score) {
+            best_score = score;
+            best_zone = zone_idx;
+            best_target = target_candidate;
         }
     }
     
-    // Log planning result
-    if (current_plan.is_valid) {
-        RCLCPP_INFO(this->get_logger(), 
-                   "Planning: Zone %d, Distance %.1f, EnvAlign %.2f, Score %.1f",
-                   current_plan.selected_harbor_zone, current_plan.path_distance, 
-                   current_plan.environmental_alignment, current_plan.feasibility_score);
+    // UPDATE PLAN
+    if (best_zone >= 0) {
+        // Check if we're switching zones
+        bool switching_zones = (best_zone != current_plan.selected_harbor_zone);
+        
+        current_plan.selected_harbor_zone = best_zone;
+        current_plan.target_point = best_target;
+        current_plan.path_distance = (best_target - current_position).norm();
+        current_plan.feasibility_score = best_score;
+        current_plan.is_valid = true;
+        
+        // Update commitment (with relaxed threshold)
+        double distance_to_selected = (harbor_zones[best_zone].center - current_position).norm();
+        
+        // Commit to zone when getting close (but allow changes)
+        if (distance_to_selected < 35.0 && committed_zone_index != best_zone) {
+            committed_zone_index = best_zone;
+            RCLCPP_INFO(this->get_logger(), "Committing to zone %d at distance %.1fm",
+                       committed_zone_index, distance_to_selected);
+        }
+        
+        // Track zone switches
+        if (switching_zones && previous_zone >= 0) {
+            last_zone_switch_time = current_time;
+            RCLCPP_INFO(this->get_logger(), 
+                       "Zone switch: %d -> %d (score: %.1f, distance: %.1f)",
+                       previous_zone, best_zone, best_score, 
+                       current_plan.path_distance);
+        }
+        
+        // Log status
+        RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+                   "Plan: Zone %d, Target (%.1f, %.1f), Dist %.1fm, Score %.1f",
+                   best_zone, best_target.x(), best_target.y(),
+                   current_plan.path_distance, best_score);
     } else {
-        RCLCPP_WARN(this->get_logger(), "No feasible path to any harbor zone found!");
+        current_plan.is_valid = false;
+        RCLCPP_WARN(this->get_logger(), "No feasible path found!");
     }
 }
 
@@ -1469,7 +1663,6 @@ void WAMV_MPC::generateStationKeepingTrajectory() {
 }
 
 void WAMV_MPC::generateAdaptiveReturnTrajectory() {
-    // Clear existing generated trajectory
     generated_trajectory.clear();
     
     if (!current_plan.is_valid) {
@@ -1477,163 +1670,144 @@ void WAMV_MPC::generateAdaptiveReturnTrajectory() {
         return;
     }
     
-    // Current position and target
     Vector2d current_pos(local_pos.x, local_pos.y);
     Vector2d target_pos = current_plan.target_point;
-    // double current_psi = local_pos.psi;
     
-    // Calculate trajectory parameters
-    double total_distance = (target_pos - current_pos).norm();
-    double target_heading_bounded = atan2(target_pos.y() - current_pos.y(), 
-                                         target_pos.x() - current_pos.x());
+    // Generate waypoints avoiding obstacles
+    std::vector<Vector2d> waypoints;
     
-    // CRITICAL: Convert to continuous form to match yaw_sum
-    double target_heading_continuous = convertToContinuousPsi(target_heading_bounded, yaw_sum);
+    // Check if direct path is blocked
+    bool direct_path_clear = isPathObstacleFree(current_pos, target_pos);
     
-    RCLCPP_INFO(this->get_logger(), "TRAJ_GEN: target_heading_bounded=%.3f, yaw_sum=%.3f, target_heading_continuous=%.3f", 
-               target_heading_bounded, yaw_sum, target_heading_continuous);
-    
-    // Generate trajectory with same structure as your mission_traj.py
-    double sample_time = 0.05;  // 20Hz to match your script
-    double cruise_speed = 1.5;  // m/s - conservative speed for fault condition
-    double approach_speed = 0.8; // m/s - slower for final approach
-    
-    // Estimate total time needed
-    // double estimated_time = total_distance / cruise_speed + 10.0; // +10s buffer
-    // int num_points = static_cast<int>(estimated_time / sample_time);
-    
-    // Phase 1: Heading adjustment (if needed)
-    double heading_error = target_heading_continuous - yaw_sum;  // Now both are continuous!
-    // No need for angle wrapping since both are continuous
-    
-    double heading_adjust_time = std::abs(heading_error) / 0.3; // 0.3 rad/s turn rate
-    int heading_adjust_points = static_cast<int>(heading_adjust_time / sample_time);
-    
-    // Phase 2: Approach to target
-    double approach_time = total_distance / cruise_speed;
-    int approach_points = static_cast<int>(approach_time / sample_time);
-    
-    // Phase 3: Final positioning (last 20m at slow speed)
-    double final_approach_distance = std::min(20.0, total_distance * 0.3);
-    double final_approach_time = final_approach_distance / approach_speed;
-    int final_points = static_cast<int>(final_approach_time / sample_time);
-    
-    // DEBUG: Print all phase information
-    RCLCPP_INFO(this->get_logger(), "TRAJ_GEN: Phases - adjust:%d, approach:%d, final:%d, total:%d", 
-               heading_adjust_points, approach_points, final_points, 
-               heading_adjust_points + approach_points + final_points + 20);
-    
-    // Generate trajectory points
-    Vector2d current_trajectory_pos = current_pos;
-    double current_trajectory_psi = yaw_sum;  // Start from current continuous psi
-    
-    // Phase 1: Heading adjustment
-    for (int i = 0; i < heading_adjust_points; i++) {
-        std::vector<double> waypoint(8);
+    if (!direct_path_clear) {
+        // Generate bypass waypoint
+        Vector2d mid_point = (current_pos + target_pos) / 2.0;
+        Vector2d perpendicular(-(target_pos.y() - current_pos.y()), 
+                               target_pos.x() - current_pos.x());
+        perpendicular.normalize();
         
-        double t = static_cast<double>(i) / std::max(heading_adjust_points, 1);
-        double smooth_factor = 3 * t * t - 2 * t * t * t; // Smooth S-curve
-        
-        // Gradually adjust heading - CONTINUOUS
-        current_trajectory_psi = yaw_sum + heading_error * smooth_factor;
-        
-        // Move forward during heading adjustment
-        double slow_forward = std::max(0.3, cruise_speed * 0.3 * smooth_factor);
-        current_trajectory_pos += Vector2d(slow_forward * cos(current_trajectory_psi) * sample_time,
-                                          slow_forward * sin(current_trajectory_psi) * sample_time);
-        
-        waypoint[0] = current_trajectory_pos.x();
-        waypoint[1] = current_trajectory_pos.y();
-        waypoint[2] = current_trajectory_psi;  // CONTINUOUS PSI
-        waypoint[3] = slow_forward;  // u
-        waypoint[4] = 0.0;           // v  
-        waypoint[5] = heading_error / std::max(heading_adjust_time, 0.1); // r
-        waypoint[6] = 0.0;           // Tp
-        waypoint[7] = 0.0;           // Ts
-        
-        generated_trajectory.push_back(waypoint);
-    }
-    
-    // Phase 2: Main approach
-    Vector2d direction = (target_pos - current_trajectory_pos).normalized();
-    
-    for (int i = 0; i < approach_points; i++) {
-        std::vector<double> waypoint(8);
-        
-        double progress = static_cast<double>(i) / std::max(approach_points, 1);
-        double current_speed = std::max(0.5, cruise_speed);
-        
-        // Slow down as we approach target
-        if (progress > 0.7) {
-            double slowdown_factor = 1.0 - (progress - 0.7) / 0.3 * 0.6;
-            current_speed = std::max(0.3, cruise_speed * slowdown_factor);
-        }
-        
-        current_trajectory_pos += direction * current_speed * sample_time;
-        
-        waypoint[0] = current_trajectory_pos.x();
-        waypoint[1] = current_trajectory_pos.y(); 
-        waypoint[2] = target_heading_continuous;  // CONTINUOUS PSI
-        waypoint[3] = current_speed;  // u
-        waypoint[4] = 0.0;           // v
-        waypoint[5] = 0.0;           // r
-        waypoint[6] = 0.0;           // Tp
-        waypoint[7] = 0.0;           // Ts
-        
-        generated_trajectory.push_back(waypoint);
-    }
-    
-    // Phase 3: Final approach and positioning
-    for (int i = 0; i < final_points + 20; i++) {
-        std::vector<double> waypoint(8);
-        
-        if (i < final_points) {
-            // Still approaching
-            double remaining_dist = (target_pos - current_trajectory_pos).norm();
-            if (remaining_dist > 0.5) {
-                Vector2d final_direction = (target_pos - current_trajectory_pos).normalized();
-                current_trajectory_pos += final_direction * approach_speed * sample_time;
-            } else {
-                current_trajectory_pos = target_pos;
+        // Test various offsets to find clear path
+        for (double offset = 10.0; offset <= 40.0; offset += 10.0) {
+            Vector2d test_point_left = mid_point + perpendicular * offset;
+            Vector2d test_point_right = mid_point - perpendicular * offset;
+            
+            // Check left bypass
+            if (isPathCorridorFree(current_pos, test_point_left, 5.0) &&
+                isPathCorridorFree(test_point_left, target_pos, 5.0)) {
+                waypoints.push_back(current_pos);
+                waypoints.push_back(test_point_left);
+                waypoints.push_back(target_pos);
+                RCLCPP_INFO(this->get_logger(), "Using left bypass at offset %.1f", offset);
+                break;
             }
             
-            waypoint[0] = current_trajectory_pos.x();
-            waypoint[1] = current_trajectory_pos.y();
-            waypoint[2] = target_heading_continuous;  // CONTINUOUS PSI
-            waypoint[3] = std::max(0.2, approach_speed * 0.5); // Minimum speed
-            waypoint[4] = 0.0;
-            waypoint[5] = 0.0;
-        } else {
-            // Final hold at target
-            waypoint[0] = target_pos.x();
-            waypoint[1] = target_pos.y();
-            waypoint[2] = target_heading_continuous;  // CONTINUOUS PSI
-            waypoint[3] = 0.1; // Small forward velocity for control authority
-            waypoint[4] = 0.0;
-            waypoint[5] = 0.0;
+            // Check right bypass
+            if (isPathCorridorFree(current_pos, test_point_right, 5.0) &&
+                isPathCorridorFree(test_point_right, target_pos, 5.0)) {
+                waypoints.push_back(current_pos);
+                waypoints.push_back(test_point_right);
+                waypoints.push_back(target_pos);
+                RCLCPP_INFO(this->get_logger(), "Using right bypass at offset %.1f", offset);
+                break;
+            }
         }
         
-        waypoint[6] = 0.0; // Tp
-        waypoint[7] = 0.0; // Ts
+        // Fallback if no bypass found
+        if (waypoints.empty()) {
+            RCLCPP_WARN(this->get_logger(), "No bypass found, using best effort");
+            waypoints.push_back(current_pos);
+            waypoints.push_back(target_pos);
+        }
+    } else {
+        waypoints.push_back(current_pos);
+        waypoints.push_back(target_pos);
+    }
+    
+    // Generate trajectory through waypoints
+    double sample_time = 0.05;
+    double cruise_speed = 1.5;
+    double approach_speed = 0.8;
+    
+    for (size_t wp_idx = 0; wp_idx < waypoints.size() - 1; wp_idx++) {
+        Vector2d start_wp = waypoints[wp_idx];
+        Vector2d end_wp = waypoints[wp_idx + 1];
+        Vector2d segment_vec = end_wp - start_wp;
+        double segment_length = segment_vec.norm();
+        Vector2d segment_dir = segment_vec.normalized();
         
+        double segment_heading = atan2(segment_dir.y(), segment_dir.x());
+        double segment_heading_continuous = convertToContinuousPsi(segment_heading, 
+                                           wp_idx == 0 ? yaw_sum : generated_trajectory.back()[2]);
+        
+        int num_points = static_cast<int>(segment_length / (cruise_speed * sample_time));
+        
+        for (int i = 0; i < num_points; i++) {
+            std::vector<double> waypoint(8);
+            double progress = static_cast<double>(i) / std::max(num_points, 1);
+            
+            Vector2d pos = start_wp + progress * segment_vec;
+            
+            // CRITICAL: Verify waypoint safety and adjust if needed
+            bool waypoint_safe = true;
+            for (const auto& dock : dock_areas) {
+                if (pointInPolygon(pos, dock)) {
+                    waypoint_safe = false;
+                    // Calculate escape direction
+                    Vector2d dock_center = Vector2d::Zero();
+                    for (const auto& vertex : dock) {
+                        dock_center += vertex;
+                    }
+                    dock_center /= dock.size();
+                    
+                    Vector2d escape_dir = (pos - dock_center).normalized();
+                    pos = pos + escape_dir * 5.0;  // Move 5m away from obstacle
+                    RCLCPP_DEBUG(this->get_logger(), "Adjusted waypoint away from dock");
+                    break;
+                }
+            }
+            
+            // Adaptive speed based on conditions
+            double segment_speed = cruise_speed;
+            if (!waypoint_safe) {
+                segment_speed *= 0.7;  // Slow down near obstacles
+            }
+            if (segment_length - progress * segment_length < 20.0) {
+                segment_speed = approach_speed;  // Slow down for final approach
+            }
+            
+            waypoint[0] = pos.x();
+            waypoint[1] = pos.y();
+            waypoint[2] = segment_heading_continuous;
+            waypoint[3] = segment_speed;
+            waypoint[4] = 0.0;  // v
+            waypoint[5] = 0.0;  // r
+            waypoint[6] = 0.0;  // Tp
+            waypoint[7] = 0.0;  // Ts
+            
+            generated_trajectory.push_back(waypoint);
+        }
+    }
+    
+    // Add final hold points at target
+    for (int i = 0; i < 20; i++) {
+        std::vector<double> waypoint(8);
+        waypoint[0] = target_pos.x();
+        waypoint[1] = target_pos.y();
+        waypoint[2] = generated_trajectory.back()[2];
+        waypoint[3] = 0.1;  // Minimal forward speed
+        waypoint[4] = 0.0;
+        waypoint[5] = 0.0;
+        waypoint[6] = 0.0;
+        waypoint[7] = 0.0;
         generated_trajectory.push_back(waypoint);
     }
     
     generated_line_number = 0;
     trajectory_generation_active = true;
     
-    // DEBUG: Print first few trajectory points
-    if (!generated_trajectory.empty()) {
-        for (int i = 0; i < std::min(3, (int)generated_trajectory.size()); i++) {
-            const auto& pt = generated_trajectory[i];
-            RCLCPP_INFO(this->get_logger(), "TRAJ_GEN: Point[%d]: pos(%.2f,%.2f), psi=%.3f, u=%.3f, v=%.3f, r=%.3f", 
-                       i, pt[0], pt[1], pt[2], pt[3], pt[4], pt[5]);
-        }
-    }
-    
     RCLCPP_INFO(this->get_logger(), 
-                "Generated adaptive return trajectory: %zu points, target (%.2f, %.2f), continuous_psi=%.3f",
-                generated_trajectory.size(), target_pos.x(), target_pos.y(), target_heading_continuous);
+                "Generated adaptive trajectory: %zu points, %zu waypoints",
+                generated_trajectory.size(), waypoints.size());
 }
 
 void WAMV_MPC::updateOperationalMode() {
@@ -1860,23 +2034,63 @@ void WAMV_MPC::updateEnvironmentalAssistance()
 }
 
 void WAMV_MPC::adaptMPCWeights() {
-    if (iteration_count >= fault_trigger && adaptive_weights.use_environmental_assistance) {
-        // Increase psi weight during fault conditions
-        double adaptive_psi_weight = 600.0;  // Increased from original 150
-        double adaptive_u_weight = 5.0;      // Slightly increase velocity weights
-        double adaptive_v_weight = 5.0;
+    // Only adapt weights after fault is triggered
+    if (iteration_count >= fault_trigger) {
+        // Simple, predictable weight adjustments
+        double psi_weight_multiplier = 3;  // Boost heading control after fault
         
-        // Update cost weights in ACADOS
-        double new_W_x[6] = {80, 10, adaptive_psi_weight, adaptive_u_weight, adaptive_v_weight, 5};
+        // Base weights from your original configuration
+        double W_x[6] = {
+            80,                           // x position
+            10,                           // y position  
+            150 * psi_weight_multiplier,  // psi (heading) - boosted for fault
+            5,                            // u (surge velocity)
+            5,                            // v (sway velocity)
+            5                             // r (yaw rate)
+        };
         
-        // Apply new weights to all horizon points
-        for (int i = 0; i <= WAMV_N; i++) {
-            ocp_nlp_cost_model_set(mpc_capsule->nlp_config, mpc_capsule->nlp_dims, 
-                                  mpc_capsule->nlp_in, i, "W", new_W_x);
+        double W_u[2] = {
+            0.001,  // Tp (port thrust)
+            0.001   // Ts (starboard thrust)
+        };
+        
+        // Mode-specific adjustments
+        if (current_mode == STATION_KEEPING) {
+            W_x[2] *= 1.2;  // Further boost heading for station keeping
+            W_x[5] *= 1.5;  // Better angular damping
+        } else if (current_mode == ADAPTIVE_ASSISTED_RETURN && zone_locked) {
+            W_x[0] *= 1.5;  // Increase position tracking when approaching target
+            W_x[1] *= 1.5;
         }
         
+        // Create weight matrices
+        Eigen::MatrixXd W_x_mat = Eigen::MatrixXd::Zero(6, 6);
+        Eigen::MatrixXd W_u_mat = Eigen::MatrixXd::Zero(2, 2);
+        
+        for (int i = 0; i < 6; i++) {
+            W_x_mat(i, i) = W_x[i];
+        }
+        W_u_mat(0, 0) = W_u[0];
+        W_u_mat(1, 1) = W_u[1];
+        
+        // Create combined W matrix (8x8) for cost.W
+        Eigen::MatrixXd W_combined = Eigen::MatrixXd::Zero(8, 8);
+        W_combined.block(0, 0, 6, 6) = W_x_mat;
+        W_combined.block(6, 6, 2, 2) = W_u_mat;
+        
+        // Update all horizon points except terminal
+        for (int i = 0; i < WAMV_N; i++) {
+            ocp_nlp_cost_model_set(mpc_capsule->nlp_config, mpc_capsule->nlp_dims, 
+                                  mpc_capsule->nlp_in, i, "W", W_combined.data());
+        }
+        
+        // Terminal cost uses only state weights
+        ocp_nlp_cost_model_set(mpc_capsule->nlp_config, mpc_capsule->nlp_dims, 
+                              mpc_capsule->nlp_in, WAMV_N, "W", W_x_mat.data());
+        
         RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 5000,
-                             "Adaptive weights active: psi_weight=%.1f", adaptive_psi_weight);
+            "Adaptive MPC: psi_weight=%.1f, mode=%d, zone_locked=%d", 
+            W_x[2], current_mode, zone_locked);
     }
 }
 
@@ -1973,4 +2187,178 @@ void WAMV_MPC::publishPredictionMetrics() {
     metrics_msg.data.push_back(sqrt(cov.trace()));
     
     prediction_metrics_pub->publish(metrics_msg);
+}
+
+// Enhanced path corridor checking
+bool WAMV_MPC::isPathCorridorFree(const Vector2d& start, const Vector2d& end, double corridor_width) {
+    // First check if direct path is free
+    if (!isPathObstacleFree(start, end)) {
+        return false;
+    }
+    
+    // For short distances, skip extensive corridor check
+    double path_length = (end - start).norm();
+    if (path_length < 30.0) {
+        return true;
+    }
+    
+    // Progressive sampling - fewer samples for initial check
+    int num_samples = std::min(10, static_cast<int>(path_length / 10.0));
+    Vector2d path_vec = end - start;
+    Vector2d path_normal = Vector2d(-path_vec.y(), path_vec.x()).normalized();
+    
+    // Check critical points with corridor width
+    for (int i = 1; i < num_samples; i++) {
+        double t = static_cast<double>(i) / num_samples;
+        Vector2d center_point = start + t * path_vec;
+        
+        // Check center point against docks
+        for (const auto& dock : dock_areas) {
+            if (pointInPolygon(center_point, dock)) {
+                return false;
+            }
+        }
+        
+        // Check corridor edges if width is significant
+        if (corridor_width > 5.0) {
+            Vector2d left_point = center_point + path_normal * (corridor_width / 2.0);
+            Vector2d right_point = center_point - path_normal * (corridor_width / 2.0);
+            
+            // Check if corridor edges are clear
+            for (const auto& dock : dock_areas) {
+                if (pointInPolygon(left_point, dock) || pointInPolygon(right_point, dock)) {
+                    return false;
+                }
+            }
+        }
+        
+        // Check boundaries at key points
+        if (i == num_samples/2) {  // Middle point
+            if (isAboveBoundaryLine(center_point) || isBelowBoundaryLine(center_point)) {
+                return false;
+            }
+        }
+    }
+    
+    return true;
+}
+
+// Helper function: Find best target point within a specific zone
+Vector2d WAMV_MPC::findBestTargetInZone(int zone_idx, const Vector2d& current_pos) {
+    const HarborZone& zone = harbor_zones[zone_idx];
+    
+    // Start with zone center
+    Vector2d best_target = zone.center;
+    double best_score = -999.0;
+    
+    // Sample multiple points within the zone
+    std::vector<Vector2d> sample_points;
+    sample_points.push_back(zone.center);
+    
+    // Add vertices as candidates
+    for (const auto& vertex : zone.vertices) {
+        sample_points.push_back(vertex);
+    }
+    
+    // Add midpoints between vertices
+    for (size_t i = 0; i < zone.vertices.size(); i++) {
+        Vector2d midpoint = (zone.vertices[i] + zone.vertices[(i+1) % zone.vertices.size()]) / 2.0;
+        sample_points.push_back(midpoint);
+    }
+    
+    // Evaluate each candidate
+    for (const auto& candidate : sample_points) {
+        // Check if path is clear
+        if (!isPathObstacleFree(current_pos, candidate)) {
+            continue;
+        }
+        
+        // Calculate score based on distance and environmental alignment
+        double distance = (candidate - current_pos).norm();
+        Vector2d path_dir = (candidate - current_pos).normalized();
+        double env_alignment = calculateEnvironmentalAlignment(path_dir);
+        
+        double score = 100.0 / (distance + 10.0) + env_alignment * 30.0;
+        
+        if (score > best_score) {
+            best_score = score;
+            best_target = candidate;
+        }
+    }
+    
+    return best_target;
+}
+
+// Helper function: Find alternative target if primary is blocked
+Vector2d WAMV_MPC::findAlternativeTargetInZone(int zone_idx, const Vector2d& current_pos) {
+    const HarborZone& zone = harbor_zones[zone_idx];
+    
+    // Try different points within the zone
+    for (const auto& vertex : zone.vertices) {
+        if (isPathObstacleFree(current_pos, vertex)) {
+            return vertex;
+        }
+    }
+    
+    // If all else fails, return center
+    return zone.center;
+}
+
+// Helper function: Calculate drift-compensated target
+Vector2d WAMV_MPC::calculateDriftCompensatedTarget(const HarborZone& zone, 
+                                                   const Vector2d& current_pos,
+                                                   const Vector2d& drift_estimate) {
+    Vector2d nominal_target = zone.center;
+    Vector2d drift_offset = Vector2d::Zero();
+    
+    double distance = (nominal_target - current_pos).norm();
+    
+    // Only apply drift compensation for significant drift
+    if (drift_estimate.norm() > 2.0 && drift_compensation_factor > 0.0) {
+        // Moderate drift compensation
+        drift_offset = -drift_compensation_factor * drift_estimate.normalized() * 
+                      std::min(distance * 0.2, max_drift_offset);
+        
+        // Ensure target stays within reasonable bounds
+        Vector2d adjusted = nominal_target + drift_offset;
+        if (!pointInPolygon(adjusted, zone.vertices)) {
+            drift_offset *= 0.5;
+        }
+    }
+    
+    return nominal_target + drift_offset;
+}
+
+// Helper function: Calculate zone score
+double WAMV_MPC::calculateZoneScore(int zone_idx, const Vector2d& target,
+                                    const Vector2d& current_pos, 
+                                    const Vector2d& path_dir,
+                                    bool obstacle_free) {
+    double distance = (target - current_pos).norm();
+    double score = 0.0;
+    
+    // Distance component
+    score += 1000.0 / (distance + 10.0);
+    
+    // Environmental alignment
+    double env_alignment = calculateEnvironmentalAlignment(path_dir);
+    score += env_alignment * 40.0;
+    
+    // Heading change penalty
+    double desired_heading = atan2(path_dir.y(), path_dir.x());
+    double heading_change = std::abs(desired_heading - local_pos.psi);
+    if (heading_change > M_PI) heading_change = 2.0 * M_PI - heading_change;
+    score -= heading_change * 20.0 / M_PI;
+    
+    // Obstacle penalty
+    if (!obstacle_free) {
+        score *= 0.3;
+    }
+    
+    // Middle zone preference (tends to be safer)
+    if (zone_idx == 1) {
+        score += 15.0;
+    }
+    
+    return score;
 }

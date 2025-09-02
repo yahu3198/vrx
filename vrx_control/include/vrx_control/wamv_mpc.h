@@ -264,7 +264,7 @@ class WAMV_MPC : public rclcpp::Node
     float yaw_error;        // yaw degree error
 
     size_t iteration_count = 0;  // Add counter
-    const size_t fault_trigger = 200;  // 10s at 20 Hz
+    const size_t fault_trigger = 300;  // 10s at 20 Hz
 
     // Buffers for low-pass filtering
     const double alpha = 0.2; // Smoothing factor (0 < alpha < 1, lower = smoother)
@@ -803,6 +803,20 @@ class WAMV_MPC : public rclcpp::Node
     PredictionValidation pred_validation;
     static const int VALIDATION_HISTORY_SIZE = 60;  // 3 seconds at 20Hz
 
+    // Enhanced planning stability variables
+    int committed_zone_index = -1;
+    double commitment_distance_threshold = 50.0;  // Progressive commitment threshold
+    double zone_switching_penalty = 0.3;         // Penalty for switching zones
+    double zone_commitment_bias = 0.2;           // Bonus for maintaining current zone
+    bool zone_locked = false;                    // Hard lock when very close to target
+    double last_zone_switch_time = 0.0;
+    static constexpr double MIN_ZONE_SWITCH_INTERVAL = 3.0;  // Minimum seconds between switches
+
+    // Drift compensation parameters
+    double drift_compensation_factor = 0.8;      // How much to compensate for drift (0-1)
+    double max_drift_offset = 20.0;              // Maximum drift compensation offset
+    Vector2d last_planned_target;
+
     public:
 
     bool is_start;
@@ -841,6 +855,17 @@ class WAMV_MPC : public rclcpp::Node
     void ref_cb_enhanced(int line_to_read);
     double convertToContinuousPsi(double target_heading_bounded, double current_continuous_psi);
     bool hasArrivedAtHarborZone();
+    bool isPathCorridorFree(const Vector2d& start, const Vector2d& end, double corridor_width);
+    // In wamv_mpc.h, add these private methods:
+    Vector2d findBestTargetInZone(int zone_idx, const Vector2d& current_pos);
+    Vector2d findAlternativeTargetInZone(int zone_idx, const Vector2d& current_pos);
+    Vector2d calculateDriftCompensatedTarget(const HarborZone& zone, 
+                                            const Vector2d& current_pos,
+                                            const Vector2d& drift_estimate);
+    double calculateZoneScore(int zone_idx, const Vector2d& target,
+                            const Vector2d& current_pos, 
+                            const Vector2d& path_dir,
+                            bool obstacle_free);
 
     void updateEnvironmentalAssistance();
     void adaptMPCWeights();
