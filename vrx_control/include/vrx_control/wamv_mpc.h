@@ -226,7 +226,7 @@ class WAMV_MPC : public rclcpp::Node
     rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr planning_status_pub;
     rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr prediction_metrics_pub;
     rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr learned_features_pub;
-    // rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr harbor_zones_pub; // For static data
+    rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr mission_metrics_pub;
 
     // Trajectory variables
     std::vector<std::vector<double>> trajectory;
@@ -817,6 +817,20 @@ class WAMV_MPC : public rclcpp::Node
     double max_drift_offset = 20.0;              // Maximum drift compensation offset
     Vector2d last_planned_target;
 
+    std::deque<double> recent_heading_changes;
+    static constexpr size_t HEADING_HISTORY_SIZE = 10;
+    double accumulated_heading_change = 0.0;
+    double last_planned_heading = 0.0;  // Track last planned heading for oscillation detection
+
+    // Mission metrics tracking
+    double mission_start_time = -1.0;      // Time when fault occurs
+    double mission_end_time = -1.0;        // Time when harbor reached
+    double mission_duration = 0.0;         // Total mission time
+    double mission_energy_consumed = 0.0;  // Total energy used (Joules)
+    double instantaneous_power = 0.0;      // Current power consumption (Watts)
+    bool mission_metrics_active = false;   // Track if we're counting metrics
+
+
     public:
 
     bool is_start;
@@ -874,6 +888,8 @@ class WAMV_MPC : public rclcpp::Node
     void validatePredictions();
     void publishPredictionMetrics();
     Vector3d transformBodyToInertial(const Vector3d& forces_body, double heading);
+
+    double calculatePowerFromThrust(double thrust);
 };
 
 #endif
