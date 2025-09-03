@@ -175,6 +175,11 @@ WAMVDashboardNode::WAMVDashboardNode(const rclcpp::NodeOptions & options)
         [this](const geometry_msgs::msg::PoseStamped::SharedPtr msg) {
             if (dashboard_) dashboard_->handleUSVStateMsg(msg);
         });
+    mission_metrics_sub_ = this->create_subscription<std_msgs::msg::Float64MultiArray>(
+        "/wamv/mission_metrics", 10,
+        [this](const std_msgs::msg::Float64MultiArray::SharedPtr msg) {
+            if (dashboard_) dashboard_->handleMissionMetricsMsg(msg);
+        });
 }
 
 void WAMVDashboardNode::setDashboard(WAMVDashboard* dashboard) {
@@ -615,6 +620,22 @@ void WAMVDashboard::handleFaultDiagnosisMsg(const std_msgs::msg::String::SharedP
 void WAMVDashboard::handleOperationalModeMsg(const std_msgs::msg::String::SharedPtr msg)
 {
     current_operational_mode_ = msg->data;
+    
+    // Force update of planning status when mode changes to STATION_KEEPING
+    if (current_operational_mode_ == "STATION_KEEPING") {
+        planning_active_ = false;  // Disable planning display
+        
+        // Update the planning status label directly
+        if (planning_status_label_) {
+            planning_status_label_->setText("🎉 Mission Complete - Station Keeping");
+        }
+        if (target_zone_label_) {
+            target_zone_label_->setText("📍 Target Zone: Arrived");
+        }
+        if (distance_label_) {
+            distance_label_->setText("Distance: 0.0 m");
+        }
+    }
 }
 
 void WAMVDashboard::handleThrusterHealthMsg(const std_msgs::msg::Float64MultiArray::SharedPtr msg)
@@ -697,6 +718,15 @@ void WAMVDashboard::updateDashboard()
     }
 }
 
+void WAMVDashboard::handleMissionMetricsMsg(const std_msgs::msg::Float64MultiArray::SharedPtr msg)
+{
+    if (msg->data.size() >= 5) {
+        mission_duration_ = msg->data[0];
+        mission_energy_ = msg->data[1];
+        mission_completed_flag_ = (msg->data[4] > 0.5);
+    }
+}
+
 void WAMVDashboard::updateHarborMapDisplay()
 {
     // Transform USV position to match harbor zone coordinate system
@@ -758,14 +788,46 @@ void WAMVDashboard::updateControlPanelDisplay()
     yaw_assist_label_->setText(yaw_assist_factor_ > 0.1 ? "Active" : "Inactive");
     
     // Update planning status
-    if (planning_active_ && selected_harbor_zone_ >= 0) {
-        planning_status_label_->setText("Adaptive return to harbor");
-        target_zone_label_->setText(QString("Target Zone: %1").arg(selected_harbor_zone_ + 1));
-        distance_label_->setText(QString("Distance: %1 m").arg(path_distance_, 0, 'f', 1));
+    static QString last_planning_status = "";
+    static QString last_target_zone = "";
+    static QString last_distance = "";
+
+    QString new_planning_status, new_target_zone, new_distance;
+
+    // Determine new values based on state
+    if (current_operational_mode_ == "STATION_KEEPING" && mission_completed_flag_) {
+        // Mission completed state with metrics
+        new_planning_status = "🎉 Mission Complete - Station Keeping";
+        new_target_zone = QString("📍 Final Zone: %1 | Duration: %2s")
+            .arg(selected_harbor_zone_ + 1)
+            .arg(mission_duration_, 0, 'f', 1);
+        new_distance = QString("Energy Used: %1 kJ (%2 kWh)")
+            .arg(mission_energy_ / 1000.0, 0, 'f', 2)
+            .arg(mission_energy_ / 3600000.0, 0, 'f', 4);
+    } else if (planning_active_ && selected_harbor_zone_ >= 0) {
+        // Active planning state
+        new_planning_status = "Adaptive return to harbor";
+        new_target_zone = QString("Target Zone: %1").arg(selected_harbor_zone_ + 1);
+        new_distance = QString("Distance: %1 m").arg(path_distance_, 0, 'f', 1);
     } else {
-        planning_status_label_->setText("Following preset trajectory");
-        target_zone_label_->setText("Target Zone: None");
-        distance_label_->setText("Distance: N/A");
+        // Default state
+        new_planning_status = "Following preset trajectory";
+        new_target_zone = "Target Zone: None";
+        new_distance = "Distance: N/A";
+    }
+
+    // Only update if values changed
+    if (new_planning_status != last_planning_status) {
+        planning_status_label_->setText(new_planning_status);
+        last_planning_status = new_planning_status;
+    }
+    if (new_target_zone != last_target_zone) {
+        target_zone_label_->setText(new_target_zone);
+        last_target_zone = new_target_zone;
+    }
+    if (new_distance != last_distance) {
+        distance_label_->setText(new_distance);
+        last_distance = new_distance;
     }
 }
 

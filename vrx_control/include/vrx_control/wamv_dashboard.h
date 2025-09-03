@@ -211,6 +211,7 @@ public:
     void handleEnvironmentalAssistanceMsg(const std_msgs::msg::Float64MultiArray::SharedPtr msg);
     void handlePlanningStatusMsg(const std_msgs::msg::Float64MultiArray::SharedPtr msg);
     void handleUSVStateMsg(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
+    void handleMissionMetricsMsg(const std_msgs::msg::Float64MultiArray::SharedPtr msg);
 
 private slots:
     void updateDashboard();
@@ -299,6 +300,9 @@ private:
     
     // Configuration
     const int UPDATE_INTERVAL_MS = 100;  // Update interval in milliseconds
+    double mission_duration_ = 0.0;
+    double mission_energy_ = 0.0;
+    bool mission_completed_flag_ = false;
     
     // Helper functions
     void setupUI();
@@ -333,6 +337,7 @@ private:
     rclcpp::Subscription<std_msgs::msg::Float64MultiArray>::SharedPtr environmental_assistance_sub_;
     rclcpp::Subscription<std_msgs::msg::Float64MultiArray>::SharedPtr planning_status_sub_;
     rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr usv_state_sub_;
+    rclcpp::Subscription<std_msgs::msg::Float64MultiArray>::SharedPtr mission_metrics_sub_;
 
     // Pointer to the dashboard UI
     WAMVDashboard* dashboard_;
