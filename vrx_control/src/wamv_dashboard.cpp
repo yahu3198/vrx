@@ -492,6 +492,33 @@ void WAMVDashboard::setupControlPanel()
     assist_layout->addLayout(surge_layout);
     assist_layout->addLayout(sway_layout);
     assist_layout->addLayout(yaw_layout);
+
+    // NEW: Environmental Forces Visualization Section
+    QGroupBox *env_forces_group = new QGroupBox("Environmental Forces Utilized");
+    QVBoxLayout *env_forces_layout = new QVBoxLayout(env_forces_group);
+    
+    // Create custom force bars
+    env_force_x_bar_ = new EnvironmentalForceBar("Fx", "N", this);
+    env_force_y_bar_ = new EnvironmentalForceBar("Fy", "N", this);
+    env_force_psi_bar_ = new EnvironmentalForceBar("Mz", "Nm", this);
+    
+    // Set appropriate ranges
+    env_force_x_bar_->setMaxRange(50.0);    // ±50N for forces
+    env_force_y_bar_->setMaxRange(50.0);    // ±50N for forces
+    env_force_psi_bar_->setMaxRange(20.0);  // ±20Nm for moment
+    
+    env_forces_layout->addWidget(env_force_x_bar_);
+    env_forces_layout->addWidget(env_force_y_bar_);
+    env_forces_layout->addWidget(env_force_psi_bar_);
+    
+    // Add a summary label
+    QLabel* env_summary = new QLabel("Gray: Available | Orange: Utilized");
+    env_summary->setAlignment(Qt::AlignCenter);
+    QFont summary_font = env_summary->font();
+    summary_font.setPointSize(9);
+    summary_font.setItalic(true);
+    env_summary->setFont(summary_font);
+    env_forces_layout->addWidget(env_summary);
     
     // Planning Status Section
     QGroupBox *planning_group = new QGroupBox("Mission Planning");
@@ -514,6 +541,7 @@ void WAMVDashboard::setupControlPanel()
     panel_layout->addWidget(fault_group);
     panel_layout->addWidget(thruster_group);
     panel_layout->addWidget(assist_group);
+    panel_layout->addWidget(env_forces_group);
     panel_layout->addWidget(planning_group);
     panel_layout->addWidget(reset_button_);
     panel_layout->addStretch();
@@ -605,7 +633,38 @@ void WAMVDashboard::handleEnvironmentalAssistanceMsg(const std_msgs::msg::Float6
         surge_assist_factor_ = msg->data[0];
         sway_assist_factor_ = msg->data[1];
         yaw_assist_factor_ = msg->data[2];
-        // wx_, wy_, wpsi_ are updated from disturbance message
+        
+        // Available forces (from EKF)
+        double available_wx = msg->data[3];
+        double available_wy = msg->data[4];
+        double available_wpsi = msg->data[5];
+        
+        // Calculate utilized forces
+        double utilized_wx = available_wx * surge_assist_factor_;
+        double utilized_wy = available_wy * sway_assist_factor_;
+        double utilized_wpsi = available_wpsi * yaw_assist_factor_;
+        
+        // Update the force bars
+        if (env_force_x_bar_) {
+            dynamic_cast<EnvironmentalForceBar*>(env_force_x_bar_)->setForces(utilized_wx, available_wx);
+        }
+        if (env_force_y_bar_) {
+            dynamic_cast<EnvironmentalForceBar*>(env_force_y_bar_)->setForces(utilized_wy, available_wy);
+        }
+        if (env_force_psi_bar_) {
+            dynamic_cast<EnvironmentalForceBar*>(env_force_psi_bar_)->setForces(utilized_wpsi, available_wpsi);
+        }
+        
+        // Auto-adjust ranges if forces exceed current range
+        if (std::abs(available_wx) > 45.0) {
+            dynamic_cast<EnvironmentalForceBar*>(env_force_x_bar_)->setMaxRange(100.0);
+        }
+        if (std::abs(available_wy) > 45.0) {
+            dynamic_cast<EnvironmentalForceBar*>(env_force_y_bar_)->setMaxRange(100.0);
+        }
+        if (std::abs(available_wpsi) > 18.0) {
+            dynamic_cast<EnvironmentalForceBar*>(env_force_psi_bar_)->setMaxRange(40.0);
+        }
     }
 }
 

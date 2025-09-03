@@ -68,6 +68,132 @@ private:
     double arrow_scale_;
 };
 
+
+class EnvironmentalForceBar : public QWidget {
+    public:
+        EnvironmentalForceBar(const QString& label, const QString& units, QWidget* parent = nullptr) 
+            : QWidget(parent), label_(label), units_(units), 
+              utilized_force_(0), available_force_(0), max_range_(50.0) {
+            setFixedHeight(60);
+            setMinimumWidth(300);
+        }
+        
+        void setForces(double utilized, double available) {
+            utilized_force_ = utilized;
+            available_force_ = available;
+            update();
+        }
+        
+        void setMaxRange(double range) {
+            max_range_ = range;
+            update();
+        }
+    
+    protected:
+        void paintEvent(QPaintEvent* event) override {
+            Q_UNUSED(event)
+            
+            QPainter painter(this);
+            painter.setRenderHint(QPainter::Antialiasing);
+            
+            // Calculate dimensions
+            int bar_height = 30;
+            int bar_width = width() - 100;
+            int bar_x = 50;
+            int bar_y = 25;
+            int center_x = bar_x + bar_width / 2;
+            
+            // Draw background
+            painter.fillRect(bar_x, bar_y, bar_width, bar_height, QColor(240, 240, 240));
+            
+            // Draw scale markings
+            painter.setPen(QPen(Qt::gray, 1));
+            for (int i = -2; i <= 2; i++) {
+                int mark_x = center_x + (i * bar_width / 4);
+                painter.drawLine(mark_x, bar_y - 3, mark_x, bar_y + bar_height + 3);
+                
+                // Draw scale labels
+                QFont small_font = painter.font();
+                small_font.setPointSize(8);
+                painter.setFont(small_font);
+                
+                double value = (i * max_range_) / 2;
+                QString text = QString::number(value, 'f', 0);
+                painter.drawText(mark_x - 15, bar_y + bar_height + 15, 30, 10, 
+                               Qt::AlignCenter, text);
+            }
+            
+            // Draw center line
+            painter.setPen(QPen(Qt::black, 2));
+            painter.drawLine(center_x, bar_y - 5, center_x, bar_y + bar_height + 5);
+            
+            // Calculate bar positions
+            double scale = (bar_width / 2.0) / max_range_;
+            
+            // Draw available force (gray)
+            if (std::abs(available_force_) > 0.1) {
+                int available_width = std::abs(available_force_) * scale;
+                available_width = std::max(2, available_width);  // Minimum visibility
+                
+                QRect available_rect;
+                if (available_force_ > 0) {
+                    available_rect = QRect(center_x, bar_y, available_width, bar_height);
+                } else {
+                    available_rect = QRect(center_x - available_width, bar_y, available_width, bar_height);
+                }
+                painter.fillRect(available_rect, QColor(180, 180, 180, 150));
+            }
+            
+            // Draw utilized force (orange)
+            if (std::abs(utilized_force_) > 0.1) {
+                int utilized_width = std::abs(utilized_force_) * scale;
+                utilized_width = std::max(2, utilized_width);  // Minimum visibility
+                
+                QRect utilized_rect;
+                if (utilized_force_ > 0) {
+                    utilized_rect = QRect(center_x, bar_y, utilized_width, bar_height);
+                } else {
+                    utilized_rect = QRect(center_x - utilized_width, bar_y, utilized_width, bar_height);
+                }
+                painter.fillRect(utilized_rect, QColor(255, 140, 0));
+            }
+            
+            // Draw border
+            painter.setPen(QPen(Qt::black, 1));
+            painter.drawRect(bar_x, bar_y, bar_width, bar_height);
+            
+            // Draw label
+            QFont label_font = painter.font();
+            label_font.setPointSize(10);
+            label_font.setBold(true);
+            painter.setFont(label_font);
+            painter.setPen(Qt::black);
+            painter.drawText(5, bar_y + bar_height/2 + 5, label_);
+            
+            // Draw value text
+            double utilization_percent = 0.0;
+            if (std::abs(available_force_) > 0.1) {
+                utilization_percent = (std::abs(utilized_force_) / std::abs(available_force_)) * 100.0;
+            }
+            
+            QString value_text = QString("%1: %2%3 (%4%)")
+                .arg(label_)
+                .arg(utilized_force_ >= 0 ? "+" : "")
+                .arg(utilized_force_, 0, 'f', 1)
+                .arg(units_)
+                .arg(utilization_percent, 0, 'f', 0);
+            
+            painter.drawText(bar_x, 5, bar_width, 20, Qt::AlignCenter, value_text);
+        }
+    
+    private:
+        QString label_;
+        QString units_;
+        double utilized_force_;
+        double available_force_;
+        double max_range_;
+};
+
 class WAMVDashboard : public QMainWindow
 {
     Q_OBJECT
@@ -159,6 +285,17 @@ private:
     
     QPushButton* reset_button_;
     QTimer* update_timer_;
+
+    // Environmental force visualization components
+    EnvironmentalForceBar* env_force_x_bar_;
+    EnvironmentalForceBar* env_force_y_bar_;
+    EnvironmentalForceBar* env_force_psi_bar_;
+    QLabel* env_force_x_label_;
+    QLabel* env_force_y_label_;
+    QLabel* env_force_psi_label_;
+    QLabel* env_force_x_value_;
+    QLabel* env_force_y_value_;
+    QLabel* env_force_psi_value_;
     
     // Configuration
     const int UPDATE_INTERVAL_MS = 100;  // Update interval in milliseconds
