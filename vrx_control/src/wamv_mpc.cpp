@@ -2068,8 +2068,11 @@ void WAMV_MPC::updateEnvironmentalAssistance()
     environmental_assistance.is_reliable = (force_magnitude < 100.0) && (force_magnitude > 0.5);
     environmental_assistance.assistance_capability = std::min(1.0, force_magnitude / 30.0);
     
+    // BASELINE MODE: Set this to false to disable all environmental assistance
+    bool ENABLE_ENV_ASSIST = true;  // <-- ADD THIS LINE
+    
     // FAULT-ONLY assistance (your key innovation)
-    if (iteration_count >= fault_trigger && environmental_assistance.is_reliable) {
+    if (iteration_count >= fault_trigger && environmental_assistance.is_reliable && ENABLE_ENV_ASSIST) {  // <-- MODIFY THIS LINE
         // After fault - enable environmental assistance
         environmental_assistance.surge_assistance_factor = 0.8;
         environmental_assistance.sway_assistance_factor = 0.8;
