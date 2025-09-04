@@ -245,42 +245,42 @@ void WAMVDashboard::initializeHarborZones()
     // Harbor zones (safe approach areas)
     harbor_zones_.resize(3);
     
-    // Zone 1: [-580, 258], [-575, 240], [-600, 236], [-600, 248]
+    // Zone 1: [-580, 258], [-572, 241], [-600, 236], [-600, 248]
     harbor_zones_[0] = {
-        QPointF(-580, 258), QPointF(-575, 240), 
+        QPointF(-580, 258), QPointF(-572, 241), 
         QPointF(-600, 236), QPointF(-600, 248)
     };
     
-    // Zone 2: [-575, 222], [-575, 208], [-595, 208], [-595, 220]
+    // Zone 2: [-570, 223], [-568, 209], [-595, 208], [-595, 220]
     harbor_zones_[1] = {
-        QPointF(-575, 222), QPointF(-575, 208),
+        QPointF(-570, 223), QPointF(-568, 209),
         QPointF(-595, 208), QPointF(-595, 220)
     };
     
-    // Zone 3: [-573, 192], [-593, 191], [-593, 183], [-584, 184]
+    // Zone 3: [-568, 192], [-593, 191], [-593, 183], [-579, 184]
     harbor_zones_[2] = {
-        QPointF(-573, 192), QPointF(-593, 191),
-        QPointF(-593, 183), QPointF(-584, 184)
+        QPointF(-568, 192), QPointF(-593, 191),
+        QPointF(-593, 183), QPointF(-579, 184)
     };
     
     // Dock areas (obstacles to avoid)
     dock_areas_.resize(2);
     
-    // Dock 1: [-575, 240], [-575, 222], [-595, 220], [-600, 236]
+    // Dock 1: [-572, 241], [-570, 223], [-595, 220], [-600, 236]
     dock_areas_[0] = {
-        QPointF(-575, 240), QPointF(-575, 222),
+        QPointF(-572, 241), QPointF(-570, 223),
         QPointF(-595, 220), QPointF(-600, 236)
     };
     
-    // Dock 2: [-575, 208], [-573, 192], [-593, 191], [-595, 208]
+    // Dock 2: [-568, 209], [-568, 192], [-593, 191], [-595, 208]
     dock_areas_[1] = {
-        QPointF(-575, 208), QPointF(-573, 192),
+        QPointF(-568, 209), QPointF(-568, 192),
         QPointF(-593, 191), QPointF(-595, 208)
     };
     
     // Boundary lines
     upper_boundary_ = {QPointF(-580, 258), QPointF(-600, 248)};
-    lower_boundary_ = {QPointF(-584, 184), QPointF(-593, 183)};
+    lower_boundary_ = {QPointF(-579, 184), QPointF(-593, 183)};
 }
 
 void WAMVDashboard::setupUI()

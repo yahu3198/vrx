@@ -1226,22 +1226,22 @@ void WAMV_MPC::initializeHarborZones() {
     harbor_zones.clear();
     harbor_zones.resize(3);
     
-    // Harbor Zone 1: [-580, 258], [-575, 240], [-600, 236], [-600, 248]
+    // Harbor Zone 1: [-580, 258], [-572, 241], [-600, 236], [-600, 248]
     harbor_zones[0].vertices = {
-        Vector2d(-580, 258), Vector2d(-575, 240), 
+        Vector2d(-580, 258), Vector2d(-572, 241), 
         Vector2d(-600, 236), Vector2d(-600, 248)
     };
     
-    // Harbor Zone 2: [-575, 222], [-575, 208], [-595, 208], [-595, 220]
+    // Harbor Zone 2: [-570, 223], [-568, 209], [-595, 208], [-595, 220]
     harbor_zones[1].vertices = {
-        Vector2d(-575, 222), Vector2d(-575, 208),
+        Vector2d(-570, 223), Vector2d(-568, 209),
         Vector2d(-595, 208), Vector2d(-595, 220)
     };
     
-    // Harbor Zone 3: [-573, 192], [-593, 191], [-593, 183], [-584, 184]
+    // Harbor Zone 3: [-568, 192], [-593, 191], [-593, 183], [-579, 184]
     harbor_zones[2].vertices = {
-        Vector2d(-573, 192), Vector2d(-593, 191),
-        Vector2d(-593, 183), Vector2d(-584, 184)
+        Vector2d(-568, 192), Vector2d(-593, 191),
+        Vector2d(-593, 183), Vector2d(-579, 184)
     };
     
     // Calculate centers for each zone
@@ -1257,15 +1257,15 @@ void WAMV_MPC::initializeHarborZones() {
     dock_areas.clear();
     dock_areas.resize(2);
     
-    // Dock 1: [-575, 240], [-575, 222], [-595, 220], [-600, 236]
+    // Dock 1: [-572, 241], [-570, 223], [-595, 220], [-600, 236]
     dock_areas[0] = {
-        Vector2d(-575, 240), Vector2d(-575, 222),
+        Vector2d(-572, 241), Vector2d(-570, 223),
         Vector2d(-595, 220), Vector2d(-600, 236)
     };
     
-    // Dock 2: [-575, 208], [-573, 192], [-593, 191], [-595, 208]
+    // Dock 2: [-568, 209], [-568, 192], [-593, 191], [-595, 208]
     dock_areas[1] = {
-        Vector2d(-575, 208), Vector2d(-573, 192),
+        Vector2d(-568, 209), Vector2d(-568, 192),
         Vector2d(-593, 191), Vector2d(-595, 208)
     };
     
@@ -1328,9 +1328,9 @@ bool WAMV_MPC::isAboveBoundaryLine(const Vector2d& point) {
 }
 
 bool WAMV_MPC::isBelowBoundaryLine(const Vector2d& point) {
-    // Lower boundary line: [-584, 184], [-593, 183]
+    // Lower boundary line: [-579, 184], [-593, 183]
     // Avoid area: y < line
-    double m = (183 - 184) / (-593 - (-584));  // slope = 1/9
+    double m = (183 - 184) / (-593 - (-579));  // slope = 1/9
     double b = 184 - m * (-584);               // y-intercept
     double line_y = m * point.x() + b;
     return point.y() < line_y;
@@ -2089,7 +2089,7 @@ void WAMV_MPC::adaptMPCWeights() {
     // Only adapt weights after fault is triggered
     if (iteration_count >= fault_trigger) {
         // Simple, predictable weight adjustments
-        double psi_weight_multiplier = 4;  // Boost heading control after fault
+        double psi_weight_multiplier = 5;  // Boost heading control after fault
         
         // Base weights from your original configuration
         double W_x[6] = {

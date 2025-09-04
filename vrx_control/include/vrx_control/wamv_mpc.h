@@ -329,7 +329,7 @@ class WAMV_MPC : public rclcpp::Node
     double prev_wy_trend = 0.1;
     double prev_wpsi_trend = 0.1;
 
-    float thruster_degrade_percentage = 0.5;
+    float thruster_degrade_percentage = 0.7;
     enum FaultSimulationType {
         NO_FAULT_SIM = 0,
         LEFT_THRUSTER_FAULT_SIM = 1,
@@ -337,7 +337,7 @@ class WAMV_MPC : public rclcpp::Node
     };
     
     // Define the fault type to simulate - change this to simulate different faults
-    static const int FAULT_TYPE_TO_SIMULATE = LEFT_THRUSTER_FAULT_SIM;
+    static const int FAULT_TYPE_TO_SIMULATE = RIGHT_THRUSTER_FAULT_SIM;
     
     // Constants for filtering
     const int FAULT_CONFIRMATION_COUNT = 2;  // Need this many consecutive detections

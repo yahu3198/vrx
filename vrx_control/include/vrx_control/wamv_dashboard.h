@@ -176,7 +176,7 @@ class EnvironmentalForceBar : public QWidget {
                 utilization_percent = (std::abs(utilized_force_) / std::abs(available_force_)) * 100.0;
             }
             
-            QString value_text = QString("%1: %2%3 (%4%)")
+            QString value_text = QString("%1: %2%3 %4 (%5%)")
                 .arg(label_)
                 .arg(utilized_force_ >= 0 ? "+" : "")
                 .arg(utilized_force_, 0, 'f', 1)
