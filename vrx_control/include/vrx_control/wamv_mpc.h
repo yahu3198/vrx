@@ -829,6 +829,7 @@ class WAMV_MPC : public rclcpp::Node
     double mission_energy_consumed = 0.0;  // Total energy used (Joules)
     double instantaneous_power = 0.0;      // Current power consumption (Watts)
     bool mission_metrics_active = false;   // Track if we're counting metrics
+    double min_distance_to_harbor;
 
 
     public:

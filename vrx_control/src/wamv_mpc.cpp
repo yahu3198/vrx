@@ -180,6 +180,8 @@ WAMV_MPC::WAMV_MPC()
 
     // initializeTrendPrediction();
     env_predictor.rls_model.initialize();
+
+    min_distance_to_harbor = 999.0;
 }
 
 // subscribe pos and vel
@@ -571,6 +573,41 @@ void WAMV_MPC::publish_cin(double Tp_mpc, double Ts_mpc)
             mode_name = "UNKNOWN";
             mode_color = "\033[37m"; // White
     }
+
+    // if (iteration_count >= fault_trigger && std::abs(local_pos.r) > 0.1) {
+    //     // Only log during active turning (when yaw rate is significant)
+        
+    //     // Get the health factors currently being used
+    //     double current_health_Tp = 1.0;
+    //     double current_health_Ts = 1.0;
+        
+    //     if (iteration_count >= fault_trigger) {
+    //         switch (FAULT_TYPE_TO_SIMULATE) {
+    //             case LEFT_THRUSTER_FAULT_SIM:
+    //                 current_health_Tp = 1.0 - thruster_degrade_percentage;
+    //                 break;
+    //             case RIGHT_THRUSTER_FAULT_SIM:
+    //                 current_health_Ts = 1.0 - thruster_degrade_percentage;
+    //                 break;
+    //         }
+    //     }
+        
+    //     RCLCPP_WARN(this->get_logger(), 
+    //         "TURN DEBUG: yaw_rate=%.3f rad/s | MPC_cmd=[%.1f, %.1f]N | Actual=[%.1f, %.1f]N | Health=[%.2f, %.2f] | Status=%d",
+    //         local_pos.r,                    // Current yaw rate
+    //         Tp_mpc, Ts_mpc,                // MPC commanded thrusts
+    //         Tp.data, Ts.data,              // Actual thrusts after degradation
+    //         current_health_Tp, current_health_Ts,  // Health factors
+    //         acados_status);                // Solver status
+            
+    //     // Also log the reference vs actual heading
+    //     RCLCPP_WARN(this->get_logger(),
+    //         "HEADING: ref=%.2f | actual=%.2f | error=%.2f | continuous=%.2f",
+    //         acados_in.yref[0][2],          // Reference heading
+    //         local_pos.psi,                 // Actual heading
+    //         yaw_error,                     // Heading error
+    //         yaw_sum);                      // Continuous heading
+    // }
     
     // Send actual values to thrusters
     left_thrust_cmd_pub->publish(Tp);
@@ -685,8 +722,8 @@ void WAMV_MPC::publish_cin(double Tp_mpc, double Ts_mpc)
         thruster_health_msg.data[0] = 100.0; // Left health %
         thruster_health_msg.data[1] = 100.0; // Right health %
     }
-    thruster_health_msg.data[2] = Tp_mpc; // Commanded left thrust
-    thruster_health_msg.data[3] = Ts_mpc; // Commanded right thrust
+    thruster_health_msg.data[2] = Tp.data; // Commanded left thrust
+    thruster_health_msg.data[3] = Ts.data; // Commanded right thrust
     thruster_health_pub->publish(thruster_health_msg);
 
     // Publish environmental assistance status
@@ -837,6 +874,33 @@ void WAMV_MPC::publish_cin(double Tp_mpc, double Ts_mpc)
                     << current_plan.target_point.x() << ", " << current_plan.target_point.y() << ")";
         }
         std::cout << "\033[0m" << std::endl;
+        if (iteration_count >= fault_trigger) {
+            std::string distance_color;
+            std::string distance_status;
+            
+            if (min_distance_to_harbor > 50.0) {
+                distance_color = "\033[31m";  // Red - far
+                distance_status = "FAR";
+            } else if (min_distance_to_harbor > 30.0) {
+                distance_color = "\033[33m";  // Yellow - moderate
+                distance_status = "APPROACHING";
+            } else if (min_distance_to_harbor > 20.0) {
+                distance_color = "\033[36m";  // Cyan - close
+                distance_status = "CLOSE";
+            } else {
+                distance_color = "\033[32m";  // Green - very close
+                distance_status = "ARRIVAL";
+            }
+            
+            std::cout << distance_color << "HARBOR DISTANCE: " << std::fixed << std::setprecision(1) 
+                      << min_distance_to_harbor << "m | Status: " << distance_status;
+            
+            // Add forced zone info for severe faults
+            if (thruster_degrade_percentage >= 0.695 && min_distance_to_harbor > 20.0) {
+                std::cout << " | FORCED ZONE ACTIVE";
+            }
+            std::cout << "\033[0m" << std::endl;
+        }
         if (committed_zone_index >= 0) {
             Vector2d current_pos(local_pos.x, local_pos.y);
             double distance_to_committed = (harbor_zones[committed_zone_index].center - current_pos).norm();
@@ -844,7 +908,7 @@ void WAMV_MPC::publish_cin(double Tp_mpc, double Ts_mpc)
             std::string commitment_status;
             std::string commitment_color;
             
-            if (distance_to_committed < 15.0) {
+            if (distance_to_committed < 10.0) {
                 commitment_status = "ZONE-LOCKED";
                 commitment_color = "\033[91m";  // Bright red
             } else if (distance_to_committed < 30.0) {
@@ -858,9 +922,9 @@ void WAMV_MPC::publish_cin(double Tp_mpc, double Ts_mpc)
                 commitment_color = "\033[37m";  // White
             }
             
-            std::cout << commitment_color << "ZONE COMMITMENT: Zone " << committed_zone_index 
-                      << " | Distance: " << std::fixed << std::setprecision(1) << distance_to_committed 
-                      << "m | Status: " << commitment_status << "\033[0m" << std::endl;
+            std::cout << commitment_color << "ZONE COMMITMENT: Zone " << (committed_zone_index + 1) 
+                << " | Distance: " << std::fixed << std::setprecision(1) << distance_to_committed 
+                << "m | Status: " << commitment_status << "\033[0m" << std::endl;
         } else {
             std::cout << "\033[37mZONE COMMITMENT: None (searching for best zone)\033[0m" << std::endl;
         }
@@ -1406,7 +1470,6 @@ double WAMV_MPC::calculateEnvironmentalAlignment(const Vector2d& path_direction)
 void WAMV_MPC::fastPlanning() {
     // Store previous plan for comparison
     int previous_zone = current_plan.selected_harbor_zone;
-    // static double last_planned_heading = local_pos.psi;  // Track last planned heading
     
     // Reset feasibility score but keep zone commitment
     current_plan.feasibility_score = -999.0;
@@ -1414,8 +1477,90 @@ void WAMV_MPC::fastPlanning() {
     Vector2d current_position(local_pos.x, local_pos.y);
     double current_time = rclcpp::Clock(RCL_SYSTEM_TIME).now().seconds() - start_time;
     
-    // [Keep existing EMERGENCY DRIFT OVERRIDE CHECK section - lines 12-70 from previous version]
-    // ... (emergency override code remains the same) ...
+    // SIMPLE HARBOR BOUNDARY DISTANCE CALCULATION
+    // Harbor boundary is at x = -570, anything with x < -570 is inside harbor
+    const double HARBOR_BOUNDARY_X = -570.0;
+    
+    // Calculate minimum distance to harbor
+    if (current_position.x() <= HARBOR_BOUNDARY_X) {
+        // Already inside harbor
+        min_distance_to_harbor = 0.0;
+    } else {
+        // Distance to the x = -570 boundary line
+        min_distance_to_harbor = local_pos.x - HARBOR_BOUNDARY_X;
+    }
+    
+    // DEBUG OUTPUT
+    RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+        "USV Position: (%.1f, %.1f) | Harbor boundary: x=%.1f | Distance to harbor: %.1fm",
+        current_position.x(), current_position.y(), HARBOR_BOUNDARY_X, min_distance_to_harbor);
+    
+    // HARD-CODED SEVERE FAULT LOGIC
+    bool force_zone_selection = false;
+    int forced_zone = -1;
+    
+    // Check for severe degradation and distance
+    if (thruster_degrade_percentage >= 0.695 && iteration_count >= fault_trigger) {
+        
+        // Force zone selection when far from harbor boundary
+        if (min_distance_to_harbor > 20.0) {
+            force_zone_selection = true;
+            
+            switch (FAULT_TYPE_TO_SIMULATE) {
+                case LEFT_THRUSTER_FAULT_SIM:
+                    forced_zone = 0;  // Zone 1
+                    RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+                        "SEVERE LEFT FAULT: Forcing Zone 1 (distance %.1fm > 20m)", 
+                        min_distance_to_harbor);
+                    break;
+                    
+                case RIGHT_THRUSTER_FAULT_SIM:
+                    forced_zone = 2;  // Zone 3
+                    RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+                        "SEVERE RIGHT FAULT: Forcing Zone 3 (distance %.1fm > 20m)", 
+                        min_distance_to_harbor);
+                    break;
+            }
+        } else {
+            if (thruster_degrade_percentage >= 0.695 && committed_zone_index == 2) {
+                RCLCPP_INFO(this->get_logger(), 
+                    "Within 15m - releasing forced commitment to Zone 3");
+                committed_zone_index = -1;  // Clear commitment to allow free selection
+                zone_locked = false;
+            }
+        }
+    }
+    
+    // If forcing zone selection, skip normal evaluation
+    if (force_zone_selection && forced_zone >= 0) {
+        const HarborZone& zone = harbor_zones[forced_zone];
+        Vector2d target = zone.center;
+        
+        // Simple target selection
+        Vector2d path_direction = (target - current_position).normalized();
+        
+        // Update plan directly
+        current_plan.selected_harbor_zone = forced_zone;
+        current_plan.target_point = target;
+        current_plan.path_distance = (target - current_position).norm();
+        current_plan.feasibility_score = 100.0;  // Arbitrary high score
+        current_plan.is_valid = true;
+        current_plan.obstacle_free = true;  // Assume clear for emergency
+        
+        // Force commitment
+        committed_zone_index = forced_zone;
+        zone_locked = false;  // Keep it flexible for adjustments
+        
+        last_planned_heading = atan2(path_direction.y(), path_direction.x());
+        
+        RCLCPP_WARN(this->get_logger(),
+            "*** FORCED ZONE %d ACTIVE: Target (%.1f, %.1f), Distance to harbor: %.1fm ***",
+            forced_zone + 1, target.x(), target.y(), min_distance_to_harbor);
+        
+        return;  // Skip rest of planning
+    }
+    
+    // ============= ORIGINAL PLANNING CODE BELOW (unchanged) =============
     
     // STANDARD ZONE COMMITMENT LOGIC with adjusted thresholds
     double commitment_bonus = 0.0;
@@ -1424,7 +1569,6 @@ void WAMV_MPC::fastPlanning() {
     if (committed_zone_index >= 0 && committed_zone_index < 3) {
         double distance_to_committed = (harbor_zones[committed_zone_index].center - current_position).norm();
         
-        // Adjusted commitment thresholds for better stability
         if (distance_to_committed < 10.0) {
             allow_zone_switch = false;
             zone_locked = true;
@@ -1432,30 +1576,32 @@ void WAMV_MPC::fastPlanning() {
         } else if (distance_to_committed < 25.0) {
             allow_zone_switch = true;
             zone_locked = false;
-            commitment_bonus = 80.0;  // Increased from 50.0 for more stability
+            commitment_bonus = 80.0;
         } else if (distance_to_committed < 40.0) {
             allow_zone_switch = true;
             zone_locked = false;
-            commitment_bonus = 40.0;  // Increased from 20.0
+            commitment_bonus = 40.0;
         } else {
             allow_zone_switch = true;
             zone_locked = false;
             commitment_bonus = 0.0;
-            committed_zone_index = -1;
+            // Don't reset committed_zone_index here - keep the forced commitment
+            if (!force_zone_selection) {
+                committed_zone_index = -1;
+            }
         }
     }
     
+    // REST OF ORIGINAL CODE...
     // ENVIRONMENTAL FORCE ANALYSIS with INCREASED filtering
     Vector3d env_forces_body = environmental_assistance.current_forces;
     
-    // Apply stronger low-pass filter for more stability
     static Vector3d filtered_env_forces = Vector3d::Zero();
-    double filter_alpha = 0.5;  // Increased from 0.3 for more smoothing
+    double filter_alpha = 0.5;
     filtered_env_forces = filter_alpha * env_forces_body + (1.0 - filter_alpha) * filtered_env_forces;
     
-    // Only use filtered forces if they're significant
     if (filtered_env_forces.norm() < 2.0) {
-        filtered_env_forces = Vector3d::Zero();  // Ignore small disturbances
+        filtered_env_forces = Vector3d::Zero();
     }
     
     double current_psi = local_pos.psi;
@@ -1472,11 +1618,9 @@ void WAMV_MPC::fastPlanning() {
     Vector2d best_target;
     double best_heading = local_pos.psi;
     
-    // Add persistence bonus for previous zone
-    double persistence_bonus = 20.0;  // Bonus for maintaining same zone
+    double persistence_bonus = 20.0;
     
     for (int zone_idx = 0; zone_idx < 3; zone_idx++) {
-        // Skip evaluation logic if needed (same as before)
         if (zone_locked && zone_idx != committed_zone_index && !allow_zone_switch) {
             double distance_to_committed = (harbor_zones[committed_zone_index].center - current_position).norm();
             if (distance_to_committed < 20.0) {
@@ -1491,26 +1635,22 @@ void WAMV_MPC::fastPlanning() {
             continue;
         }
         
-        // TARGET SELECTION with reduced drift compensation for stability
         Vector2d target_candidate;
         
         if (distance < 20.0) {
             target_candidate = zone.center;
         } else {
-            // Use reduced drift compensation to avoid overcorrection
             Vector2d nominal_target = zone.center;
             Vector2d drift_offset = Vector2d::Zero();
             
-            // Only apply drift compensation for strong, consistent drift
-            if (drift_estimate_inertial.norm() > 5.0) {  // Increased threshold
-                drift_offset = -0.5 * drift_estimate_inertial.normalized() *  // Reduced factor
-                              std::min(distance * 0.15, 10.0);  // Reduced max offset
+            if (drift_estimate_inertial.norm() > 5.0) {
+                drift_offset = -0.5 * drift_estimate_inertial.normalized() *
+                              std::min(distance * 0.15, 10.0);
             }
             
             target_candidate = nominal_target + drift_offset;
         }
         
-        // PATH CHECK
         bool obstacle_free = isPathCorridorFree(current_position, target_candidate, 8.0);
         
         if (!obstacle_free) {
@@ -1522,32 +1662,26 @@ void WAMV_MPC::fastPlanning() {
             }
         }
         
-        // SCORE CALCULATION with heading penalty
         Vector2d path_direction = (target_candidate - current_position).normalized();
         double score = calculateZoneScore(zone_idx, target_candidate, current_position, 
                                          path_direction, obstacle_free);
         
-        // Commitment bonus
         if (zone_idx == committed_zone_index) {
             score += commitment_bonus;
         }
         
-        // PERSISTENCE BONUS for maintaining same zone
         if (zone_idx == previous_zone) {
             score += persistence_bonus;
         }
         
-        // Zone switching penalty (mild)
         if (zone_idx != previous_zone && previous_zone >= 0) {
-            score *= 0.9;  // Only 10% reduction
+            score *= 0.9;
             
-            // Time-based penalty
             if (current_time - last_zone_switch_time < MIN_ZONE_SWITCH_INTERVAL) {
-                score *= 0.95;  // Only 5% additional reduction
+                score *= 0.95;
             }
         }
         
-        // Update best option
         if (score > best_score) {
             best_score = score;
             best_zone = zone_idx;
@@ -1556,7 +1690,6 @@ void WAMV_MPC::fastPlanning() {
         }
     }
     
-    // UPDATE PLAN
     if (best_zone >= 0) {
         bool switching_zones = (best_zone != current_plan.selected_harbor_zone);
         
@@ -1566,14 +1699,11 @@ void WAMV_MPC::fastPlanning() {
         current_plan.feasibility_score = best_score;
         current_plan.is_valid = true;
         
-        // Update last planned heading for next iteration
         last_planned_heading = best_heading;
         
-        // Update commitment with preference for Zone 2
         double distance_to_selected = (harbor_zones[best_zone].center - current_position).norm();
         
-        // Prefer committing to Zone 2 earlier
-        double commit_threshold = (best_zone == 1) ? 40.0 : 35.0;  // Commit to Zone 2 at 40m
+        double commit_threshold = (best_zone == 1) ? 40.0 : 35.0;
         
         if (distance_to_selected < commit_threshold && committed_zone_index != best_zone) {
             committed_zone_index = best_zone;
@@ -1581,7 +1711,6 @@ void WAMV_MPC::fastPlanning() {
                        committed_zone_index, distance_to_selected);
         }
         
-        // Track zone switches
         if (switching_zones && previous_zone >= 0) {
             last_zone_switch_time = current_time;
             RCLCPP_INFO(this->get_logger(), 
@@ -1591,9 +1720,9 @@ void WAMV_MPC::fastPlanning() {
         }
         
         RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
-                   "Plan: Zone %d, Target (%.1f, %.1f), Dist %.1fm, Score %.1f, HeadingAccum %.2f rad",
+                   "Plan: Zone %d, Target (%.1f, %.1f), Dist %.1fm, Score %.1f, Harbor Dist %.1fm",
                    best_zone, best_target.x(), best_target.y(),
-                   current_plan.path_distance, best_score, accumulated_heading_change);
+                   current_plan.path_distance, best_score, min_distance_to_harbor);
     } else {
         current_plan.is_valid = false;
         RCLCPP_WARN(this->get_logger(), "No feasible path found!");
