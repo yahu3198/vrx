@@ -2218,7 +2218,7 @@ void WAMV_MPC::adaptMPCWeights() {
     // Only adapt weights after fault is triggered
     if (iteration_count >= fault_trigger) {
         // Simple, predictable weight adjustments
-        double psi_weight_multiplier = 5;  // Boost heading control after fault
+        double psi_weight_multiplier = 8;  // Boost heading control after fault
         
         // Base weights from your original configuration
         double W_x[6] = {
