@@ -2192,20 +2192,34 @@ void WAMV_MPC::updateEnvironmentalAssistance()
     // Update current environmental forces from EKF
     environmental_assistance.current_forces = Vector3d(esti_x[6], esti_x[7], esti_x[8]);
     
-    // Simple reliability check
+    // Enhanced reliability check with adaptive thresholds
     double force_magnitude = environmental_assistance.current_forces.norm();
-    environmental_assistance.is_reliable = (force_magnitude < 100.0) && (force_magnitude > 0.5);
+    environmental_assistance.is_reliable = (force_magnitude < 150.0) && (force_magnitude > 0.5);
     environmental_assistance.assistance_capability = std::min(1.0, force_magnitude / 30.0);
     
-    // BASELINE MODE: Set this to false to disable all environmental assistance
-    bool ENABLE_ENV_ASSIST = true;  // <-- ADD THIS LINE
+    bool ENABLE_ENV_ASSIST = true;
     
-    // FAULT-ONLY assistance (your key innovation)
-    if (iteration_count >= fault_trigger && environmental_assistance.is_reliable && ENABLE_ENV_ASSIST) {  // <-- MODIFY THIS LINE
-        // After fault - enable environmental assistance
-        environmental_assistance.surge_assistance_factor = 0.8;
-        environmental_assistance.sway_assistance_factor = 0.8;
-        environmental_assistance.yaw_assistance_factor = 0.8;
+    // Adaptive assistance based on fault severity
+    if (iteration_count >= fault_trigger && environmental_assistance.is_reliable && ENABLE_ENV_ASSIST) {
+        
+        // Detect complete failure scenario
+        bool complete_failure = (thruster_degrade_percentage >= 0.9);
+        
+        if (complete_failure) {
+            // MAXIMUM environmental assistance for complete failure
+            environmental_assistance.surge_assistance_factor = 1.0;  // Use 100% of available force
+            environmental_assistance.sway_assistance_factor = 0.95;  // Slightly less for stability
+            environmental_assistance.yaw_assistance_factor = 1.0;    // Full yaw assistance
+            
+            RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+                "COMPLETE THRUSTER FAILURE: Maximum environmental assistance active");
+        } else {
+            // Scaled assistance based on degradation level
+            double base_factor = 0.6 + (thruster_degrade_percentage * 0.4);
+            environmental_assistance.surge_assistance_factor = std::min(1.0, base_factor);
+            environmental_assistance.sway_assistance_factor = std::min(0.9, base_factor * 0.9);
+            environmental_assistance.yaw_assistance_factor = std::min(1.0, base_factor);
+        }
     } else {
         // Normal operation - NO environmental assistance
         environmental_assistance.surge_assistance_factor = 0.0;
@@ -2218,7 +2232,7 @@ void WAMV_MPC::adaptMPCWeights() {
     // Only adapt weights after fault is triggered
     if (iteration_count >= fault_trigger) {
         // Simple, predictable weight adjustments
-        double psi_weight_multiplier = 15;  // Boost heading control after fault
+        double psi_weight_multiplier = 30;  // Boost heading control after fault
         
         // Base weights from your original configuration
         double W_x[6] = {
@@ -2289,29 +2303,32 @@ Vector3d WAMV_MPC::transformBodyToInertial(const Vector3d& forces_body, double h
 }
 
 void WAMV_MPC::updateEnvironmentalPrediction() {
-    // Get current state
     Eigen::Vector3d current_forces(esti_x[6], esti_x[7], esti_x[8]);
     Eigen::Vector2d current_velocity(local_pos.u, local_pos.v);
     double current_time = rclcpp::Clock(RCL_SYSTEM_TIME).now().seconds() - start_time;
     
-    // Update the predictor with new observation
     env_predictor.update(current_forces, current_time, local_pos.psi, current_velocity);
     
-    // Fill MPC horizon with predictions
+    // Detect complete failure
+    bool complete_failure = (iteration_count >= fault_trigger) && 
+                           (thruster_degrade_percentage >= 0.95);
+    
     for (int i = 0; i <= WAMV_N; i++) {
-        double prediction_horizon = i * 0.05;  // 50ms timestep
-        
-        // Get prediction
+        double prediction_horizon = i * 0.05;
         Eigen::Vector3d predicted = env_predictor.predict(prediction_horizon);
         
-        // Apply assistance factors (only after fault)
-        if (iteration_count >= fault_trigger) {
-            // Scale by confidence
-            // double confidence = env_predictor.prediction_confidence;
-            double confidence_factor = sqrt(env_predictor.prediction_confidence);
-            confidence_factor = std::max(0.3, confidence_factor);  // Minimum 30%
+        if (complete_failure) {
+            // In complete failure, use MORE aggressive environmental force utilization
+            double confidence_factor = std::max(0.5, sqrt(env_predictor.prediction_confidence));
             
-            acados_param[i][2] = predicted.x() * 0.6 * confidence_factor;  // Higher base factor
+            // Use higher factors for complete failure
+            acados_param[i][2] = predicted.x() * 0.9 * confidence_factor;  // 90% utilization
+            acados_param[i][3] = predicted.y() * 0.8 * confidence_factor;  // 80% utilization
+            acados_param[i][4] = predicted.z() * 0.9 * confidence_factor;  // 90% for yaw
+        } else if (iteration_count >= fault_trigger) {
+            // Normal fault handling
+            double confidence_factor = std::max(0.3, sqrt(env_predictor.prediction_confidence));
+            acados_param[i][2] = predicted.x() * 0.6 * confidence_factor;
             acados_param[i][3] = predicted.y() * 0.5 * confidence_factor;
             acados_param[i][4] = predicted.z() * 0.6 * confidence_factor;
         } else {

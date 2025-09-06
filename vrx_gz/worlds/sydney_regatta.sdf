@@ -635,15 +635,15 @@
       </message>
     </plugin> -->
 
-    <plugin filename="libUSVWind.so" name="vrx::USVWind">
+    <!-- <plugin filename="libUSVWind.so" name="vrx::USVWind">
       <wind_obj>
         <name>wamv</name>
         <link_name>wamv/base_link</link_name>
         <coeff_vector>.5 .5 .33</coeff_vector>
-      </wind_obj>
+      </wind_obj> -->
       
       <!-- Moderate wind conditions for testing -->
-      <wind_direction>225</wind_direction>        
+      <!-- <wind_direction>225</wind_direction>        
       <wind_mean_velocity>8.0</wind_mean_velocity> 
       <var_wind_gain_constants>0.3</var_wind_gain_constants> 
       <var_wind_time_constants>10</var_wind_time_constants>   
@@ -655,37 +655,37 @@
     </plugin>
 
     <plugin filename="libPublisherPlugin.so" name="vrx::PublisherPlugin">
-      <message type="gz.msgs.Param" topic="/vrx/wavefield/parameters" every="1.0">
+      <message type="gz.msgs.Param" topic="/vrx/wavefield/parameters" every="1.0"> -->
         
         <!-- Wave direction (coming FROM this direction) -->
-        <params>
+        <!-- <params>
           <key>direction</key>
           <value>
             <type>DOUBLE</type>
             <double_value>200.0</double_value> 
           </value>
-        </params>
+        </params> -->
         
         <!-- Wave height (significant wave height) -->
-        <params>
+        <!-- <params>
           <key>gain</key>
           <value>
             <type>DOUBLE</type>
             <double_value>0.8</double_value> 
           </value>
-        </params>
+        </params> -->
         
         <!-- Wave period -->
-        <params>
+        <!-- <params>
           <key>period</key>
           <value>
             <type>DOUBLE</type>
             <double_value>6.0</double_value> 
           </value>
-        </params>
+        </params> -->
         
         <!-- Wave steepness -->
-        <params>
+        <!-- <params>
           <key>steepness</key>
           <value>
             <type>DOUBLE</type>
@@ -694,7 +694,104 @@
         </params>
         
       </message>
+    </plugin> -->
+
+    <!-- Wind Configuration with Asymmetric Force -->
+    <plugin filename="libUSVWind.so" name="vrx::USVWind">
+      <wind_obj>
+        <name>wamv</name>
+        <link_name>wamv/base_link</link_name>
+        <!-- Asymmetric coefficients to create yaw moment -->
+        <!-- Higher lateral coefficient creates side force → yaw moment -->
+        <coeff_vector>0.6 0.85 0.55</coeff_vector>
+      </wind_obj>
+      
+      <!-- Wind FROM 190° (SSW) instead of pure 180° -->
+      <!-- This 10° offset creates asymmetric loading → yaw moment -->
+      <wind_direction>190</wind_direction>        
+      
+      <!-- Strong wind for better control authority -->
+      <wind_mean_velocity>13.0</wind_mean_velocity> 
+      
+      <!-- Higher variability creates periodic yaw moments -->
+      <var_wind_gain_constants>0.45</var_wind_gain_constants> 
+      <var_wind_time_constants>6</var_wind_time_constants>   
+      
+      <random_seed>42</random_seed>               
+      <update_rate>20</update_rate>               
+      
+      <topic_wind_speed>/vrx/debug/wind/speed</topic_wind_speed>
+      <topic_wind_direction>/vrx/debug/wind/direction</topic_wind_direction>
     </plugin>
+
+    <!-- Wave Field with Different Angle for Yaw Moment -->
+    <plugin filename="libPublisherPlugin.so" name="vrx::PublisherPlugin">
+      <message type="gz.msgs.Param" topic="/vrx/wavefield/parameters" every="1.0">
+        
+        <!-- Waves FROM 160° (SSE) - different from wind -->
+        <!-- This 30° difference creates oscillating yaw moments -->
+        <params>
+          <key>direction</key>
+          <value>
+            <type>DOUBLE</type>
+            <double_value>160.0</double_value> 
+          </value>
+        </params>
+        
+        <!-- Moderate wave height -->
+        <params>
+          <key>gain</key>
+          <value>
+            <type>DOUBLE</type>
+            <double_value>1.0</double_value> 
+          </value>
+        </params>
+        
+        <!-- Shorter period creates more frequent yaw impulses -->
+        <params>
+          <key>period</key>
+          <value>
+            <type>DOUBLE</type>
+            <double_value>5.0</double_value> 
+          </value>
+        </params>
+        
+        <!-- Higher steepness for sharper wave impacts → stronger moments -->
+        <params>
+          <key>steepness</key>
+          <value>
+            <type>DOUBLE</type>
+            <double_value>0.04</double_value> 
+          </value>
+        </params>
+        
+      </message>
+    </plugin>
+
+    <!-- Alternative: Oscillating Wave Direction for Periodic Yaw Moments -->
+    <!-- This creates a more dynamic yaw assistance pattern -->
+    <!--
+    <plugin filename="libPublisherPlugin.so" name="vrx::DynamicWaves">
+      <message type="gz.msgs.Param" topic="/vrx/wavefield/parameters" every="10.0">
+        <params>
+          <key>direction</key>
+          <value>
+            <type>DOUBLE</type>
+            <double_value>150.0</double_value> 
+          </value>
+        </params>
+      </message>
+      <message type="gz.msgs.Param" topic="/vrx/wavefield/parameters" every="20.0">
+        <params>
+          <key>direction</key>
+          <value>
+            <type>DOUBLE</type>
+            <double_value>170.0</double_value>
+          </value>
+        </params>
+      </message>
+    </plugin>
+    -->
 
   </world>
 </sdf>
