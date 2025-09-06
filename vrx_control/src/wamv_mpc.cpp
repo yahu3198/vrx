@@ -896,7 +896,7 @@ void WAMV_MPC::publish_cin(double Tp_mpc, double Ts_mpc)
                       << min_distance_to_harbor << "m | Status: " << distance_status;
             
             // Add forced zone info for severe faults
-            if (thruster_degrade_percentage >= 0.695 && min_distance_to_harbor > 20.0) {
+            if (thruster_degrade_percentage >= 0.695 && min_distance_to_harbor > 25.0) {
                 std::cout << " | FORCED ZONE ACTIVE";
             }
             std::cout << "\033[0m" << std::endl;
@@ -1503,7 +1503,7 @@ void WAMV_MPC::fastPlanning() {
     if (thruster_degrade_percentage >= 0.695 && iteration_count >= fault_trigger) {
         
         // Force zone selection when far from harbor boundary
-        if (min_distance_to_harbor > 20.0) {
+        if (min_distance_to_harbor > 25.0) {
             force_zone_selection = true;
             
             switch (FAULT_TYPE_TO_SIMULATE) {
@@ -2218,7 +2218,7 @@ void WAMV_MPC::adaptMPCWeights() {
     // Only adapt weights after fault is triggered
     if (iteration_count >= fault_trigger) {
         // Simple, predictable weight adjustments
-        double psi_weight_multiplier = 8;  // Boost heading control after fault
+        double psi_weight_multiplier = 15;  // Boost heading control after fault
         
         // Base weights from your original configuration
         double W_x[6] = {
