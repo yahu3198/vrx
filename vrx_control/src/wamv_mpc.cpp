@@ -441,8 +441,17 @@ void WAMV_MPC::solve()
         acados_param[i][0] = solver_param.Tp_pre;
         acados_param[i][1] = solver_param.Ts_pre;
         // acados_param[i][2], [3], [4] already set by updateEnvironmentalPrediction()
-        acados_param[i][5] = health_Tp;
-        acados_param[i][6] = health_Ts;
+        // acados_param[i][5] = health_Tp;
+        // acados_param[i][6] = health_Ts;
+        if (ENABLE_ENV_ASSIST) {
+            // Proposed MPC: Pass health parameters to MPC for fault-aware control
+            acados_param[i][5] = health_Tp;
+            acados_param[i][6] = health_Ts;
+        } else {
+            // Baseline MPC: MPC doesn't know about the fault (always assumes healthy)
+            acados_param[i][5] = 1.0;
+            acados_param[i][6] = 1.0;
+        }
         
         wamv_acados_update_params(mpc_capsule, i, acados_param[i], WAMV_NP);
     }
@@ -573,41 +582,6 @@ void WAMV_MPC::publish_cin(double Tp_mpc, double Ts_mpc)
             mode_name = "UNKNOWN";
             mode_color = "\033[37m"; // White
     }
-
-    // if (iteration_count >= fault_trigger && std::abs(local_pos.r) > 0.1) {
-    //     // Only log during active turning (when yaw rate is significant)
-        
-    //     // Get the health factors currently being used
-    //     double current_health_Tp = 1.0;
-    //     double current_health_Ts = 1.0;
-        
-    //     if (iteration_count >= fault_trigger) {
-    //         switch (FAULT_TYPE_TO_SIMULATE) {
-    //             case LEFT_THRUSTER_FAULT_SIM:
-    //                 current_health_Tp = 1.0 - thruster_degrade_percentage;
-    //                 break;
-    //             case RIGHT_THRUSTER_FAULT_SIM:
-    //                 current_health_Ts = 1.0 - thruster_degrade_percentage;
-    //                 break;
-    //         }
-    //     }
-        
-    //     RCLCPP_WARN(this->get_logger(), 
-    //         "TURN DEBUG: yaw_rate=%.3f rad/s | MPC_cmd=[%.1f, %.1f]N | Actual=[%.1f, %.1f]N | Health=[%.2f, %.2f] | Status=%d",
-    //         local_pos.r,                    // Current yaw rate
-    //         Tp_mpc, Ts_mpc,                // MPC commanded thrusts
-    //         Tp.data, Ts.data,              // Actual thrusts after degradation
-    //         current_health_Tp, current_health_Ts,  // Health factors
-    //         acados_status);                // Solver status
-            
-    //     // Also log the reference vs actual heading
-    //     RCLCPP_WARN(this->get_logger(),
-    //         "HEADING: ref=%.2f | actual=%.2f | error=%.2f | continuous=%.2f",
-    //         acados_in.yref[0][2],          // Reference heading
-    //         local_pos.psi,                 // Actual heading
-    //         yaw_error,                     // Heading error
-    //         yaw_sum);                      // Continuous heading
-    // }
     
     // Send actual values to thrusters
     left_thrust_cmd_pub->publish(Tp);
@@ -857,9 +831,12 @@ void WAMV_MPC::publish_cin(double Tp_mpc, double Ts_mpc)
         
         mission_metrics_pub->publish(metrics_msg);
     }
+    // Add indicator to show which controller is active
+    std::string controller_type = ENABLE_ENV_ASSIST ? "ENV-ASSISTED" : "BASELINE";
 
     if(cout_counter > 2){
         std::cout << "---------------------------------------------------------------------------------------------------------------------" << std::endl;
+        std::cout << "\033[95mCONTROLLER: " << controller_type << "\033[0m" << std::endl;  // Magenta color
         // ENHANCED: Add operational mode status line
         std::cout << mode_color << "OPERATIONAL MODE: " << mode_name 
                 << " | Iteration: " << iteration_count 
@@ -1503,7 +1480,7 @@ void WAMV_MPC::fastPlanning() {
     if (thruster_degrade_percentage >= 0.695 && iteration_count >= fault_trigger) {
         
         // Force zone selection when far from harbor boundary
-        if (min_distance_to_harbor > 25.0) {
+        if (min_distance_to_harbor > 33.0) {
             force_zone_selection = true;
             
             switch (FAULT_TYPE_TO_SIMULATE) {
@@ -2197,7 +2174,7 @@ void WAMV_MPC::updateEnvironmentalAssistance()
     environmental_assistance.is_reliable = (force_magnitude < 150.0) && (force_magnitude > 0.5);
     environmental_assistance.assistance_capability = std::min(1.0, force_magnitude / 30.0);
     
-    bool ENABLE_ENV_ASSIST = true;
+    // bool ENABLE_ENV_ASSIST = true;
     
     // Adaptive assistance based on fault severity
     if (iteration_count >= fault_trigger && environmental_assistance.is_reliable && ENABLE_ENV_ASSIST) {
@@ -2230,7 +2207,7 @@ void WAMV_MPC::updateEnvironmentalAssistance()
 
 void WAMV_MPC::adaptMPCWeights() {
     // Only adapt weights after fault is triggered
-    if (iteration_count >= fault_trigger) {
+    if (ENABLE_ENV_ASSIST && iteration_count >= fault_trigger) {
         // Simple, predictable weight adjustments
         double psi_weight_multiplier = 30;  // Boost heading control after fault
         
@@ -2286,6 +2263,35 @@ void WAMV_MPC::adaptMPCWeights() {
         RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 5000,
             "Adaptive MPC: psi_weight=%.1f, mode=%d, zone_locked=%d", 
             W_x[2], current_mode, zone_locked);
+    } else {
+        // Baseline MPC: Use original weights without adaptation
+        double W_x[6] = {80, 10, 150, 5, 5, 5};  // Original weights
+        double W_u[2] = {0.001, 0.001};
+        
+        // Create weight matrices
+        Eigen::MatrixXd W_x_mat = Eigen::MatrixXd::Zero(6, 6);
+        Eigen::MatrixXd W_u_mat = Eigen::MatrixXd::Zero(2, 2);
+        
+        for (int i = 0; i < 6; i++) {
+            W_x_mat(i, i) = W_x[i];
+        }
+        W_u_mat(0, 0) = W_u[0];
+        W_u_mat(1, 1) = W_u[1];
+        
+        // Create combined W matrix (8x8) for cost.W
+        Eigen::MatrixXd W_combined = Eigen::MatrixXd::Zero(8, 8);
+        W_combined.block(0, 0, 6, 6) = W_x_mat;
+        W_combined.block(6, 6, 2, 2) = W_u_mat;
+        
+        // Update all horizon points with baseline weights
+        for (int i = 0; i < WAMV_N; i++) {
+            ocp_nlp_cost_model_set(mpc_capsule->nlp_config, mpc_capsule->nlp_dims, 
+                                  mpc_capsule->nlp_in, i, "W", W_combined.data());
+        }
+        
+        // Terminal cost uses only state weights
+        ocp_nlp_cost_model_set(mpc_capsule->nlp_config, mpc_capsule->nlp_dims, 
+                              mpc_capsule->nlp_in, WAMV_N, "W", W_x_mat.data());
     }
 }
 
@@ -2590,16 +2596,37 @@ double WAMV_MPC::calculateZoneScore(int zone_idx, const Vector2d& target,
 }
 
 double WAMV_MPC::calculatePowerFromThrust(double thrust) {
-    // Approximation: P = k * T^(3/2) for marine thrusters
-    // Using typical thruster efficiency curve
-    // Adjust these coefficients based on your thruster specifications
-    const double k_thrust = 0.015;  // Power coefficient (tune based on thruster specs)
-    const double idle_power = 5.0;  // Idle power consumption in Watts
+    // Physics-based calculation using momentum theory for marine propellers
+    // This is the most scientifically accurate method
     
+    // Handle zero or negative thrust
     if (thrust <= 0) {
-        return idle_power;
+        return 5.0;  // Idle power consumption in Watts
     }
     
-    // Power = coefficient * thrust^1.5 + idle power
-    return k_thrust * std::pow(thrust, 1.5) + idle_power;
+    // Thruster physical parameters from your config file
+    const double PROPELLER_DIAMETER = 0.2;     // meters
+    const double FLUID_DENSITY = 1000.0;       // kg/m³
+    
+    // Efficiency chain for electric thruster system
+    const double PROPELLER_EFFICIENCY = 0.55;  // Typical for small marine props
+    const double MOTOR_EFFICIENCY = 0.85;      // Electric motor efficiency
+    const double DRIVE_EFFICIENCY = 0.95;      // ESC/controller efficiency
+    
+    // Calculate propeller disk area
+    double prop_area = M_PI * std::pow(PROPELLER_DIAMETER / 2.0, 2);
+    
+    // Momentum theory: Ideal power = T^(3/2) / sqrt(2 * ρ * A)
+    // This represents the theoretical minimum power needed
+    double ideal_power = std::pow(thrust, 1.5) / 
+                        std::sqrt(2.0 * FLUID_DENSITY * prop_area);
+    
+    // Account for real-world inefficiencies
+    double total_efficiency = PROPELLER_EFFICIENCY * MOTOR_EFFICIENCY * DRIVE_EFFICIENCY;
+    double actual_power = ideal_power / total_efficiency;
+    
+    // Add baseline losses (bearing friction, controller overhead, cooling fans, etc.)
+    const double FIXED_LOSSES = 10.0;  // Watts
+    
+    return actual_power + FIXED_LOSSES;
 }

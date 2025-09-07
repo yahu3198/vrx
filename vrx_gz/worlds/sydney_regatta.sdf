@@ -703,26 +703,27 @@
         <link_name>wamv/base_link</link_name>
         <!-- Asymmetric coefficients to create yaw moment -->
         <!-- Higher lateral coefficient creates side force → yaw moment -->
-        <coeff_vector>0.6 0.85 0.55</coeff_vector>
+        <coeff_vector>0.5 0.5 0.33</coeff_vector>
       </wind_obj>
       
       <!-- Wind FROM 190° (SSW) instead of pure 180° -->
       <!-- This 10° offset creates asymmetric loading → yaw moment -->
-      <wind_direction>190</wind_direction>        
+      <wind_direction>135</wind_direction>       
       
       <!-- Strong wind for better control authority -->
-      <wind_mean_velocity>13.0</wind_mean_velocity> 
+      <wind_mean_velocity>6.5</wind_mean_velocity>
       
       <!-- Higher variability creates periodic yaw moments -->
-      <var_wind_gain_constants>0.45</var_wind_gain_constants> 
-      <var_wind_time_constants>6</var_wind_time_constants>   
+      <var_wind_gain_constants>0.4</var_wind_gain_constants>
+      <var_wind_time_constants>8</var_wind_time_constants>  
       
-      <random_seed>42</random_seed>               
-      <update_rate>20</update_rate>               
+      <random_seed>42</random_seed>              
+      <update_rate>20</update_rate>              
       
       <topic_wind_speed>/vrx/debug/wind/speed</topic_wind_speed>
       <topic_wind_direction>/vrx/debug/wind/direction</topic_wind_direction>
     </plugin>
+
 
     <!-- Wave Field with Different Angle for Yaw Moment -->
     <plugin filename="libPublisherPlugin.so" name="vrx::PublisherPlugin">
@@ -734,7 +735,7 @@
           <key>direction</key>
           <value>
             <type>DOUBLE</type>
-            <double_value>160.0</double_value> 
+            <double_value>120.0</double_value>
           </value>
         </params>
         
@@ -743,7 +744,7 @@
           <key>gain</key>
           <value>
             <type>DOUBLE</type>
-            <double_value>1.0</double_value> 
+            <double_value>1.5</double_value>
           </value>
         </params>
         
@@ -752,7 +753,7 @@
           <key>period</key>
           <value>
             <type>DOUBLE</type>
-            <double_value>5.0</double_value> 
+            <double_value>7.0</double_value>
           </value>
         </params>
         
@@ -761,12 +762,13 @@
           <key>steepness</key>
           <value>
             <type>DOUBLE</type>
-            <double_value>0.04</double_value> 
+            <double_value>0.04</double_value>
           </value>
         </params>
         
       </message>
     </plugin>
+
 
     <!-- Alternative: Oscillating Wave Direction for Periodic Yaw Moments -->
     <!-- This creates a more dynamic yaw assistance pattern -->

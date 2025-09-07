@@ -38,6 +38,7 @@
       <launch_file>start_mpc.launch.py</launch_file>
       <launch_file>dashboard.launch.py</launch_file>
       <launch_file>mpc_with_dashboard.launch.py</launch_file>
+      <launch_file>mpc_with_record.launch.py</launch_file>
     </launch>
   </export>
 </package>
