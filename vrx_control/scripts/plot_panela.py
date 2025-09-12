@@ -123,7 +123,7 @@ class PanelAGenerator:
         
         # Add time label
         if time_label is not None:
-            text = ax.text(x + 0.8, y + 1.5, time_label,
+            text = ax.text(x + 0.5, y + 1.5, time_label,
                         fontsize=8, alpha=alpha*0.7, weight='bold')
             text.set_path_effects([path_effects.withStroke(linewidth=3, foreground='white')])
     
@@ -134,7 +134,7 @@ class PanelAGenerator:
         trajectory = self.extract_trajectory()
         
         # Create figure
-        fig, ax = plt.subplots(figsize=(8, 8), dpi=150)
+        fig, ax = plt.subplots(figsize=(10, 6), dpi=150)  # Was (8, 8)
         ax.set_aspect('equal')
         
         # Plot limits (same as panel B)
@@ -229,9 +229,9 @@ class PanelAGenerator:
         ax.plot(fault_x_rot, fault_y_rot, 'r*', markersize=15, markeredgewidth=2,
             markeredgecolor='darkred', label='Fault Detected')
         
-        ax.annotate('95% Thruster\nFailure', 
+        ax.annotate('Left Thruster\n95% Loss', 
                 xy=(fault_x_rot, fault_y_rot), 
-                xytext=(fault_x_rot-15, fault_y_rot+15),
+                xytext=(fault_x_rot-22, fault_y_rot+15),
                 fontsize=10, weight='bold', color='darkred',
                 arrowprops=dict(arrowstyle='->', connectionstyle='arc3,rad=0.3',
                                 color='darkred', linewidth=2),
@@ -254,7 +254,7 @@ class PanelAGenerator:
         # Add "DRIFT" annotation
         ax.annotate('DRIFT', 
                 xy=(final_x_rot, final_y_rot), 
-                xytext=(final_x_rot+10, final_y_rot-10),
+                xytext=(final_x_rot+10, final_y_rot-12),
                 fontsize=12, weight='bold', color='darkred',
                 arrowprops=dict(arrowstyle='->', connectionstyle='arc3,rad=-0.3',
                                 color='darkred', linewidth=2))
@@ -269,8 +269,8 @@ class PanelAGenerator:
         metrics_text = (
             f"✗ Mission Failed\n"
             f"USV Drifted Away\n"
-            f"Unable to Reach Harbor\n"
-            f"Fault: Left Thruster 95% Degraded"
+            f"Unable to Reach Harbor"
+            # f"Fault: Left Thruster 95% Degraded"
         )
         
         props = dict(boxstyle='round,pad=0.5', facecolor='lightcoral', 

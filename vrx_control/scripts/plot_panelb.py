@@ -154,7 +154,7 @@ class ICRAFigureGenerator:
         metrics = self.extract_metrics()
         
         # Create figure
-        fig, ax = plt.subplots(figsize=(8, 8), dpi=150)
+        fig, ax = plt.subplots(figsize=(10, 6), dpi=150)  # Was (8, 8)
         ax.set_aspect('equal')
         
         # CORRECTED plot limits - moved scene DOWN (towards more negative east values)
@@ -239,9 +239,9 @@ class ICRAFigureGenerator:
         ax.plot(fault_x_rot, fault_y_rot, 'r*', markersize=15, markeredgewidth=2,
             markeredgecolor='darkred', label='Fault Detected')
         
-        ax.annotate('95% Thruster\nFailure', 
+        ax.annotate('Left Thruster\n95% Loss', 
                 xy=(fault_x_rot, fault_y_rot), 
-                xytext=(fault_x_rot-15, fault_y_rot+15),
+                xytext=(fault_x_rot-25, fault_y_rot+15),
                 fontsize=10, weight='bold', color='darkred',
                 arrowprops=dict(arrowstyle='->', connectionstyle='arc3,rad=0.3',
                                 color='darkred', linewidth=2),
@@ -268,8 +268,8 @@ class ICRAFigureGenerator:
             metrics_text = (
                 f"✓ Mission Success\n"
                 f"Mission Duration: {recovery_time:.1f}s\n"
-                f"Energy Used: {metrics['energy']:.1f} kJ\n"
-                f"Fault: Left Thruster 95% Degraded"
+                f"Energy Used: {metrics['energy']:.1f} kJ"
+                # f"Fault: Left Thruster 95% Degraded"
             )
             
             props = dict(boxstyle='round,pad=0.5', facecolor='lightgreen', 
@@ -339,7 +339,7 @@ class ICRAFigureGenerator:
         # Add time label CLOSER to ship
         if time_label is not None:
             # Reduced offset from 12 to 5 for closer positioning
-            text = ax.text(x + 0.8, y + 1.5, time_label,
+            text = ax.text(x + 0.6, y + 2, time_label,
                         fontsize=8, alpha=alpha*0.7, weight='bold')
             text.set_path_effects([path_effects.withStroke(linewidth=3, foreground='white')])
         
