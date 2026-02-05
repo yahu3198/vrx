@@ -24,8 +24,8 @@ from sensor_msgs.msg import Imu
 import numpy as np
 import copy
 
-from .base_fault_node import BaseFaultInjectionNode
-from .fault_types import IMUFaultType, IMU_FAULT_DESCRIPTIONS
+from sensor_fault_injection.base_fault_node import BaseFaultInjectionNode
+from sensor_fault_injection.fault_types import IMUFaultType, IMU_FAULT_DESCRIPTIONS
 
 
 class IMUFaultInjectionNode(BaseFaultInjectionNode):

@@ -12,10 +12,10 @@ find_package(rclpy REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 
-# Install Python modules
+# Install Python modules (this installs the package so imports work)
 ament_python_install_package(${PROJECT_NAME})
 
-# Install Python executables
+# Install Python executables (note: no .py extension in destination)
 install(PROGRAMS
   sensor_fault_injection/gps_fault_injection_node.py
   sensor_fault_injection/imu_fault_injection_node.py

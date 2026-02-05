@@ -21,10 +21,10 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     # Get package share directory
-    pkg_share = get_package_share_directory('gps_fault_injection')
+    pkg_share = get_package_share_directory('sensor_fault_injection')
     
     # Default config file path
-    default_config = os.path.join(pkg_share, 'config', 'gps_fault_params.yaml')
+    default_config = os.path.join(pkg_share, 'config', 'fault_params.yaml')
     
     # Declare launch arguments
     declare_config_file = DeclareLaunchArgument(
@@ -59,7 +59,7 @@ def generate_launch_description():
     
     # GPS Fault Injection Node
     gps_fault_injection_node = Node(
-        package='gps_fault_injection',
+        package='sensor_fault_injection',
         executable='gps_fault_injection_node.py',
         name='gps_fault_injection_node',
         output='screen',
