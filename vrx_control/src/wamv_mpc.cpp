@@ -1553,7 +1553,7 @@ void WAMV_MPC::fastPlanning() {
         } else if (distance_to_committed < 25.0) {
             allow_zone_switch = true;
             zone_locked = false;
-            commitment_bonus = 80.0;
+            commitment_bonus = 100.0;
         } else if (distance_to_committed < 40.0) {
             allow_zone_switch = true;
             zone_locked = false;
@@ -2209,7 +2209,7 @@ void WAMV_MPC::adaptMPCWeights() {
     // Only adapt weights after fault is triggered
     if (ENABLE_ENV_ASSIST && iteration_count >= fault_trigger) {
         // Simple, predictable weight adjustments
-        double psi_weight_multiplier = 30;  // Boost heading control after fault
+        double psi_weight_multiplier = 50;  // Boost heading control after fault
         
         // Base weights from your original configuration
         double W_x[6] = {
@@ -2265,7 +2265,7 @@ void WAMV_MPC::adaptMPCWeights() {
             W_x[2], current_mode, zone_locked);
     } else {
         // Baseline MPC: Use original weights without adaptation
-        double W_x[6] = {80, 10, 150, 5, 5, 5};  // Original weights
+        double W_x[6] = {80, 10, 350, 5, 5, 5};  // Original weights
         double W_u[2] = {0.001, 0.001};
         
         // Create weight matrices

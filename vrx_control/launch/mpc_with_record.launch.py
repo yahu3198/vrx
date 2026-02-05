@@ -11,7 +11,7 @@ def generate_launch_description():
     
     # Generate bag name with timestamp
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    bag_name = f"env_mpc_left_0.5_{timestamp}"
+    bag_name = f"env_mpc_left_0.95_{timestamp}"
     bag_dir = os.path.expanduser("~/usv_ws/experiments/bags")
     
     # Create directory if it doesn't exist

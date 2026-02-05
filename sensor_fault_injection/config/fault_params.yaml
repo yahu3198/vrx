@@ -1,0 +1,164 @@
+# =============================================================================
+# Sensor Fault Injection Configuration
+# =============================================================================
+# 
+# This file configures fault injection for GPS and IMU sensors
+# in VRX USV simulation.
+#
+# =============================================================================
+
+# =============================================================================
+# GPS Fault Injection Configuration
+# =============================================================================
+#
+# Fault Types:
+#   0 = NONE      : No fault injection (pass-through)
+#   1 = OUTAGE    : Complete signal loss / dropout
+#   2 = JUMP      : Instantaneous position offset
+#   3 = STUCK     : Frozen sensor readings
+#   4 = MULTIPATH : Oscillating correlated errors
+#
+# =============================================================================
+
+gps_fault_injection_node:
+  ros__parameters:
+    
+    # ---------------------------------------------------------
+    # Topic Configuration
+    # ---------------------------------------------------------
+    input_topic: "/wamv/sensors/gps/gps/fix"
+    output_topic: "/wamv/sensors/gps/gps/fix_faulty"
+    
+    # ---------------------------------------------------------
+    # Fault Selection
+    # ---------------------------------------------------------
+    fault_type: 0
+    fault_enabled: false
+    
+    # ---------------------------------------------------------
+    # Stuck-at-Fault Parameters (Common)
+    # ---------------------------------------------------------
+    stuck:
+      duration_sec: 5.0
+      trigger_time: 10.0
+    
+    # ---------------------------------------------------------
+    # Outage/Dropout Parameters
+    # ---------------------------------------------------------
+    # Simulates complete GPS signal loss
+    #
+    # Real-world causes:
+    #   - Signal blockage (antenna obstruction)
+    #   - Electromagnetic interference
+    #   - Receiver malfunction
+    #
+    outage:
+      probability: 0.1
+      duration_sec: 2.0
+      mode: "intermittent"    # 'intermittent' or 'sustained'
+    
+    # ---------------------------------------------------------
+    # Jump/Step Error Parameters
+    # ---------------------------------------------------------
+    # Simulates sudden position discontinuity
+    #
+    # Real-world causes:
+    #   - Satellite constellation change
+    #   - Receiver reacquisition
+    #   - Kalman filter reset
+    #
+    jump:
+      offset_lat: 0.0001      # degrees (~11m)
+      offset_lon: 0.0001      # degrees (~11m)
+      offset_alt: 5.0         # meters
+      probability: 0.05
+      persistent: true
+    
+    # ---------------------------------------------------------
+    # Multipath Parameters
+    # ---------------------------------------------------------
+    # Simulates GPS signal reflection
+    #
+    # Real-world causes:
+    #   - Signal reflection off water surface
+    #   - Reflection from nearby structures
+    #   - Reflection from large vessels
+    #
+    multipath:
+      amplitude_m: 5.0
+      frequency_hz: 0.2
+      phase_offset: 0.0
+      noise_stddev: 1.0
+
+
+# =============================================================================
+# IMU Fault Injection Configuration
+# =============================================================================
+#
+# Fault Types:
+#   0 = NONE       : No fault injection (pass-through)
+#   1 = STUCK      : Frozen sensor readings
+#   2 = SATURATION : Output clipped at max/min values
+#
+# Note: VRX IMU already has comprehensive noise modeling including:
+#   - Gaussian noise
+#   - Bias (static and dynamic)
+#   - Bias drift
+#   - Quantization
+# Therefore, this focuses on fault modes NOT covered by existing noise model.
+#
+# =============================================================================
+
+imu_fault_injection_node:
+  ros__parameters:
+    
+    # ---------------------------------------------------------
+    # Topic Configuration
+    # ---------------------------------------------------------
+    input_topic: "/wamv/sensors/imu/imu/data"
+    output_topic: "/wamv/sensors/imu/imu/data_faulty"
+    
+    # ---------------------------------------------------------
+    # Fault Selection
+    # ---------------------------------------------------------
+    fault_type: 0
+    fault_enabled: false
+    
+    # ---------------------------------------------------------
+    # Stuck-at-Fault Parameters (Common)
+    # ---------------------------------------------------------
+    stuck:
+      duration_sec: 5.0
+      trigger_time: 10.0
+    
+    # ---------------------------------------------------------
+    # Saturation Parameters
+    # ---------------------------------------------------------
+    # Simulates sensor output clipping
+    #
+    # Real-world causes:
+    #   - Extreme motion (collision, high-speed maneuver)
+    #   - Motion exceeding sensor measurement range
+    #   - Wrong sensor range configuration
+    #
+    # Typical MEMS gyro ranges:
+    #   ±250 deg/s  ≈ ±4.36 rad/s
+    #   ±500 deg/s  ≈ ±8.73 rad/s
+    #   ±2000 deg/s ≈ ±34.9 rad/s
+    #
+    # Typical MEMS accelerometer ranges:
+    #   ±2g  ≈ ±19.6 m/s²
+    #   ±4g  ≈ ±39.2 m/s²
+    #   ±8g  ≈ ±78.5 m/s²
+    #   ±16g ≈ ±156.9 m/s²
+    #
+    saturation:
+      angular_velocity:
+        max_x: 4.36           # rad/s (±250 deg/s)
+        max_y: 4.36           # rad/s
+        max_z: 4.36           # rad/s
+      linear_acceleration:
+        max_x: 19.6           # m/s² (±2g)
+        max_y: 19.6           # m/s²
+        max_z: 19.6           # m/s²
+      log_events: true

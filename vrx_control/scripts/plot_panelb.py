@@ -140,10 +140,10 @@ class ICRAFigureGenerator:
                 fc=color, ec='darkgreen', alpha=alpha*0.8, linewidth=1)
         
         # Add time label
-        if time_label is not None:
-            text = ax.text(x + 10, y + 10, f't={time_label}s',
-                          fontsize=8, alpha=alpha*0.7, weight='bold')
-            text.set_path_effects([path_effects.withStroke(linewidth=3, foreground='white')])
+        # if time_label is not None:
+        #     text = ax.text(x + 10, y + 10, f't={time_label}s',
+        #                   fontsize=8, alpha=alpha*0.7, weight='bold')
+        #     text.set_path_effects([path_effects.withStroke(linewidth=3, foreground='white')])
     
     def generate_panel_b(self, save_path='figure1_panel_b.pdf'):
         """Generate Panel B showing successful environment-assisted return"""
@@ -233,57 +233,57 @@ class ICRAFigureGenerator:
                                     time_label, alpha=alpha, color='blue')  # Changed to blue
         
         # 5. Add fault indicator
-        fault_x_rot, fault_y_rot = rotate_coords(trajectory.iloc[fault_idx]['x'],
-                                                trajectory.iloc[fault_idx]['y'])
+        # fault_x_rot, fault_y_rot = rotate_coords(trajectory.iloc[fault_idx]['x'],
+        #                                         trajectory.iloc[fault_idx]['y'])
         
-        ax.plot(fault_x_rot, fault_y_rot, 'r*', markersize=15, markeredgewidth=2,
-            markeredgecolor='darkred', label='Fault Detected')
+        # ax.plot(fault_x_rot, fault_y_rot, 'r*', markersize=15, markeredgewidth=2,
+        #     markeredgecolor='darkred', label='Fault Detected')
         
-        ax.annotate('Left Thruster\n95% Loss', 
-                xy=(fault_x_rot, fault_y_rot), 
-                xytext=(fault_x_rot-25, fault_y_rot+15),
-                fontsize=10, weight='bold', color='darkred',
-                arrowprops=dict(arrowstyle='->', connectionstyle='arc3,rad=0.3',
-                                color='darkred', linewidth=2),
-                bbox=dict(boxstyle="round,pad=0.3", facecolor="yellow", 
-                            edgecolor="darkred", alpha=0.8))
+        # ax.annotate('Left Thruster\n95% Loss', 
+        #         xy=(fault_x_rot, fault_y_rot), 
+        #         xytext=(fault_x_rot-25, fault_y_rot+15),
+        #         fontsize=10, weight='bold', color='darkred',
+        #         arrowprops=dict(arrowstyle='->', connectionstyle='arc3,rad=0.3',
+        #                         color='darkred', linewidth=2),
+        #         bbox=dict(boxstyle="round,pad=0.3", facecolor="yellow", 
+        #                     edgecolor="darkred", alpha=0.8))
         
         # 6. Add success indicator
-        final_x_rot, final_y_rot = rotate_coords(trajectory.iloc[-1]['x'],
-                                                trajectory.iloc[-1]['y'])
+        # final_x_rot, final_y_rot = rotate_coords(trajectory.iloc[-1]['x'],
+        #                                         trajectory.iloc[-1]['y'])
         
         # Success checkmark
-        ax.plot([final_x_rot-3, final_x_rot], [final_y_rot-3, final_y_rot-6], 'g-', linewidth=4)
-        ax.plot([final_x_rot, final_x_rot+5], [final_y_rot-6, final_y_rot+2], 'g-', linewidth=4)
+        # ax.plot([final_x_rot-3, final_x_rot], [final_y_rot-3, final_y_rot-6], 'g-', linewidth=4)
+        # ax.plot([final_x_rot, final_x_rot+5], [final_y_rot-6, final_y_rot+2], 'g-', linewidth=4)
         
         # 7. Title and labels
-        ax.set_xlabel('North (m)', fontsize=12, weight='bold')
-        ax.set_ylabel('East (m)', fontsize=12, weight='bold')
-        ax.set_title('Environment-Assisted MPC: Successful Harbor Return', 
-                    fontsize=14, weight='bold', pad=20)
+        # ax.set_xlabel('North (m)', fontsize=12, weight='bold')
+        # ax.set_ylabel('East (m)', fontsize=12, weight='bold')
+        # ax.set_title('Environment-Assisted MPC: Successful Harbor Return', 
+        #             fontsize=14, weight='bold', pad=20)
         
         # Metrics box
-        if metrics:
-            recovery_time = mission_end_time - fault_time
-            metrics_text = (
-                f"✓ Mission Success\n"
-                f"Mission Duration: {recovery_time:.1f}s\n"
-                f"Energy Used: {metrics['energy']:.1f} kJ"
-                # f"Fault: Left Thruster 95% Degraded"
-            )
+        # if metrics:
+        #     recovery_time = mission_end_time - fault_time
+        #     metrics_text = (
+        #         f"✓ Mission Success\n"
+        #         f"Mission Duration: {recovery_time:.1f}s\n"
+        #         f"Energy Used: {metrics['energy']:.1f} kJ"
+        #         # f"Fault: Left Thruster 95% Degraded"
+        #     )
             
-            props = dict(boxstyle='round,pad=0.5', facecolor='lightgreen', 
-                        alpha=0.9, edgecolor='darkgreen', linewidth=2)
-            ax.text(0.95, 0.95, metrics_text, transform=ax.transAxes,
-                fontsize=11, weight='bold', va='top', ha='right', bbox=props)
+        #     props = dict(boxstyle='round,pad=0.5', facecolor='lightgreen', 
+        #                 alpha=0.9, edgecolor='darkgreen', linewidth=2)
+        #     ax.text(0.95, 0.95, metrics_text, transform=ax.transAxes,
+        #         fontsize=11, weight='bold', va='top', ha='right', bbox=props)
         
         # Environmental assistance indicator
-        assist_text = "Virtual Actuators: ACTIVE"
-        props = dict(boxstyle='round,pad=0.3', facecolor='lightblue',
-                    alpha=0.9, edgecolor='darkblue', linewidth=2)
-        ax.text(0.95, 0.05, assist_text, transform=ax.transAxes,
-            fontsize=10, weight='bold', va='bottom', ha='right', 
-            bbox=props, color='darkblue')
+        # assist_text = "Virtual Actuators: ACTIVE"
+        # props = dict(boxstyle='round,pad=0.3', facecolor='lightblue',
+        #             alpha=0.9, edgecolor='darkblue', linewidth=2)
+        # ax.text(0.95, 0.05, assist_text, transform=ax.transAxes,
+        #     fontsize=10, weight='bold', va='bottom', ha='right', 
+        #     bbox=props, color='darkblue')
         
         # Grid and styling
         ax.grid(True, alpha=0.3, linestyle=':', linewidth=0.5)
@@ -337,11 +337,11 @@ class ICRAFigureGenerator:
         ax.add_patch(ship_patch)
         
         # Add time label CLOSER to ship
-        if time_label is not None:
-            # Reduced offset from 12 to 5 for closer positioning
-            text = ax.text(x + 0.6, y + 2, time_label,
-                        fontsize=8, alpha=alpha*0.7, weight='bold')
-            text.set_path_effects([path_effects.withStroke(linewidth=3, foreground='white')])
+        # if time_label is not None:
+        #     # Reduced offset from 12 to 5 for closer positioning
+        #     text = ax.text(x + 0.6, y + 2, time_label,
+        #                 fontsize=8, alpha=alpha*0.7, weight='bold')
+        #     text.set_path_effects([path_effects.withStroke(linewidth=3, foreground='white')])
         
 
 if __name__ == "__main__":

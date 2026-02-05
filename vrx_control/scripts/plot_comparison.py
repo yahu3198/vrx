@@ -50,6 +50,9 @@ class ComparisonFigureGenerator:
             'dock': '#FFB6C1'           # Light red
         }
         
+        # Store mission times for each scenario
+        self.mission_times = {}
+        
         # Define harbor zones (from your previous code)
         self.harbor_zones = self._define_harbor_zones()
         self.dock_areas = self._define_dock_areas()
@@ -326,7 +329,7 @@ class ComparisonFigureGenerator:
         # Labels and formatting
         ax.set_xlabel('North (m)', fontsize=8)
         ax.set_ylabel('East (m)', fontsize=8)
-        ax.set_title(title, fontsize=9, weight='bold')
+        ax.set_title(title, fontsize=9)
         ax.grid(True, alpha=0.3, linestyle=':', linewidth=0.5)
         ax.legend(loc='upper right', fontsize=6, framealpha=0.9)
         
@@ -398,10 +401,6 @@ class ComparisonFigureGenerator:
             ax.fill_between(time_p, thrust_contribution*100, 100,
                            color=self.colors['environment'], alpha=0.7, label='Environment')
         
-        # Add baseline indicator (no environmental assistance)
-        # ax.axhline(y=100, color=self.colors['baseline'], linestyle='--', 
-        #           linewidth=1.5, alpha=0.5, label='Baseline (No Env.)')
-        
         # Mark fault time with more emphasis
         ax.axvline(x=15, color='red', linestyle=':', linewidth=2, alpha=0.8)
         ax.text(15, 90, 'Fault\nOccurs', rotation=0, fontsize=7, ha='center', 
@@ -417,19 +416,24 @@ class ComparisonFigureGenerator:
         # Formatting
         ax.set_xlabel('Time (s)', fontsize=8)
         ax.set_ylabel('Control Authority (%)', fontsize=8)
-        ax.set_title(title, fontsize=9, weight='bold')
+        ax.set_title(title, fontsize=9)
         ax.set_ylim(0, 105)
         if 'time_p' in locals():
             ax.set_xlim(0, max(time_p))
         ax.grid(True, alpha=0.3, linestyle=':', linewidth=0.5)
         ax.legend(loc='upper right', fontsize=6, framealpha=0.9)
         
-    def plot_distance_to_harbor_panel(self, ax, data_baseline, data_proposed, title):
-        """Plot distance to harbor over time using simple x-position calculation"""
+    def plot_distance_to_harbor_panel(self, ax, data_baseline, data_proposed, title, scenario_label=None):
+        """Plot distance to harbor over time and extract mission times"""
         
         # Harbor x-position target
         harbor_x_target = -570
         harbor_threshold = 1  # meters
+        fault_time = 15  # seconds
+        
+        # Initialize mission time tracking for this scenario
+        baseline_mission_time = None
+        proposed_mission_time = None
         
         # Calculate distance for baseline
         if not data_baseline['trajectory'].empty:
@@ -441,17 +445,12 @@ class ComparisonFigureGenerator:
             # Check if baseline reaches harbor
             harbor_reach_idx_b = next((i for i, d in enumerate(distances_b) if d < harbor_threshold), -1)
             if harbor_reach_idx_b > 0:
+                # Calculate mission time from fault to success
+                baseline_mission_time = time_b[harbor_reach_idx_b] - fault_time
+                
                 # Truncate trajectory at mission completion
                 time_b = time_b[:harbor_reach_idx_b+1]
                 distances_b = distances_b[:harbor_reach_idx_b+1]
-                
-                # Add success annotation for baseline
-                # ax.annotate('SUCCESS', 
-                #            xy=(time_b[-1], distances_b[-1]),
-                #            xytext=(time_b[-1]-30, 20),
-                #            fontsize=8, color=self.colors['baseline'], weight='bold',
-                #            arrowprops=dict(arrowstyle='->', color=self.colors['baseline'], 
-                #                          linewidth=2, alpha=0.8))
             
             ax.plot(time_b, distances_b, '--', color=self.colors['baseline'], 
                     linewidth=2, label='MPC', alpha=0.8)
@@ -475,21 +474,22 @@ class ComparisonFigureGenerator:
             # Find when mission completes (reaches harbor)
             harbor_reach_idx_p = next((i for i, d in enumerate(distances_p) if d < harbor_threshold), -1)
             if harbor_reach_idx_p > 0:
+                # Calculate mission time from fault to success
+                proposed_mission_time = time_p[harbor_reach_idx_p] - fault_time
+                
                 # Truncate trajectory at mission completion
                 time_p = time_p[:harbor_reach_idx_p+1]
                 distances_p = distances_p[:harbor_reach_idx_p+1]
-                
-                # Add success annotation for proposed
-                # Position it differently from baseline to avoid overlap
-                # ax.annotate('SUCCESS', 
-                #            xy=(time_p[-1], distances_p[-1]),
-                #            xytext=(time_p[-1]-26, 15),
-                #            fontsize=8, color='green', weight='bold',
-                #            arrowprops=dict(arrowstyle='->', color='green', 
-                #                          linewidth=2))
             
             ax.plot(time_p, distances_p, '-', color=self.colors['proposed'], 
                     linewidth=2, label='EAMPC', alpha=0.9)
+        
+        # Store mission times if scenario label provided
+        if scenario_label:
+            self.mission_times[scenario_label] = {
+                'baseline': baseline_mission_time,
+                'proposed': proposed_mission_time
+            }
         
         # Add horizontal line at harbor threshold
         ax.axhline(y=harbor_threshold, color='green', linestyle=':', 
@@ -506,65 +506,64 @@ class ComparisonFigureGenerator:
         # Formatting
         ax.set_xlabel('Time (s)', fontsize=8)
         ax.set_ylabel('Distance to Harbor (m)', fontsize=8)
-        ax.set_title(title, fontsize=9, weight='bold')
+        ax.set_title(title, fontsize=9)
         ax.set_ylim(bottom=0)  # Distance can't be negative
         ax.grid(True, alpha=0.3, linestyle=':', linewidth=0.5)
-        ax.legend(loc='upper right', fontsize=6, framealpha=0.9)  # Changed to upper right
+        ax.legend(loc='upper right', fontsize=6, framealpha=0.9)
         
-    def plot_energy_panel(self, ax, data_baseline, data_proposed, title):
-        """Plot cumulative energy consumption panel (kept for backwards compatibility)"""
+    def print_mission_times(self):
+        """Print mission completion times for all scenarios"""
+        print("\n" + "="*60)
+        print("MISSION COMPLETION TIMES (from fault at t=15s to harbor)")
+        print("="*60)
         
-        # Plot baseline energy if available
-        if not data_baseline['energy'].empty:
-            time_b = data_baseline['energy']['time'].values
-            energy_b = data_baseline['energy']['cumulative'].values
-            ax.plot(time_b, energy_b, '--', color=self.colors['baseline'], 
-                    linewidth=2, label='MPC')
-        
-        # Plot proposed energy if available
-        if not data_proposed['energy'].empty:
-            time_p = data_proposed['energy']['time'].values
-            energy_p = data_proposed['energy']['cumulative'].values
-            ax.plot(time_p, energy_p, '-', color=self.colors['proposed'], 
-                    linewidth=2, label='EAMPC')
+        for scenario, times in self.mission_times.items():
+            print(f"\n{scenario}:")
             
-            # Fill area between curves if both exist
-            if not data_baseline['energy'].empty:
-                # Interpolate to common time base
-                max_time = min(time_b[-1], time_p[-1])
-                common_time = np.linspace(0, max_time, 200)
-                
-                interp_b = interp1d(time_b, energy_b, kind='linear', 
-                                   bounds_error=False, fill_value='extrapolate')
-                interp_p = interp1d(time_p, energy_p, kind='linear',
-                                   bounds_error=False, fill_value='extrapolate')
-                
-                energy_b_common = interp_b(common_time)
-                energy_p_common = interp_p(common_time)
-                
-                ax.fill_between(common_time, energy_p_common, energy_b_common,
-                               where=(energy_b_common >= energy_p_common),
-                               color='green', alpha=0.2, label='Energy Saved')
-                
-                # Calculate and show reduction
-                if energy_b[-1] > 0:
-                    reduction = (1 - energy_p[-1]/energy_b[-1]) * 100
-                    ax.text(0.98, 0.5, f'Energy Saved:\n{reduction:.1f}%',
-                           transform=ax.transAxes, fontsize=8,
-                           bbox=dict(boxstyle='round,pad=0.3', 
-                                   facecolor='lightgreen', alpha=0.8),
-                           ha='right', va='center')
+            if times['baseline'] is not None:
+                print(f"  Baseline MPC: {times['baseline']:.1f} seconds")
+            else:
+                print(f"  Baseline MPC: FAILED (did not reach harbor)")
+            
+            if times['proposed'] is not None:
+                print(f"  Proposed EAMPC: {times['proposed']:.1f} seconds")
+            else:
+                print(f"  Proposed EAMPC: FAILED (did not reach harbor)")
+            
+            # Calculate improvement if both successful
+            if times['baseline'] is not None and times['proposed'] is not None:
+                improvement = (times['baseline'] - times['proposed']) / times['baseline'] * 100
+                print(f"  Time Reduction: {improvement:.1f}%")
+                print(f"  Time Saved: {times['baseline'] - times['proposed']:.1f} seconds")
         
-        # Mark fault time
-        ax.axvline(x=15, color='red', linestyle=':', linewidth=1.5, alpha=0.7)
-        ax.text(15, ax.get_ylim()[1]*0.9, 'Fault', rotation=0, fontsize=7, ha='center')
+        print("\n" + "="*60)
+        print("SUMMARY STATISTICS")
+        print("="*60)
         
-        # Formatting
-        ax.set_xlabel('Time (s)', fontsize=9)
-        ax.set_ylabel('Cumulative Energy (kJ)', fontsize=9)
-        ax.set_title(title, fontsize=10, weight='bold')
-        ax.grid(True, alpha=0.3, linestyle=':', linewidth=0.5)
-        ax.legend(loc='upper left', fontsize=7, framealpha=0.9)
+        # Count successes
+        baseline_successes = sum(1 for s in self.mission_times.values() if s['baseline'] is not None)
+        proposed_successes = sum(1 for s in self.mission_times.values() if s['proposed'] is not None)
+        
+        print(f"\nSuccess Rate:")
+        print(f"  Baseline MPC: {baseline_successes}/{len(self.mission_times)} scenarios")
+        print(f"  Proposed EAMPC: {proposed_successes}/{len(self.mission_times)} scenarios")
+        
+        # Average times for successful missions
+        baseline_times = [s['baseline'] for s in self.mission_times.values() if s['baseline'] is not None]
+        proposed_times = [s['proposed'] for s in self.mission_times.values() if s['proposed'] is not None]
+        
+        if baseline_times:
+            print(f"\nAverage Mission Time (successful only):")
+            print(f"  Baseline MPC: {np.mean(baseline_times):.1f} ± {np.std(baseline_times):.1f} seconds")
+        
+        if proposed_times:
+            print(f"  Proposed EAMPC: {np.mean(proposed_times):.1f} ± {np.std(proposed_times):.1f} seconds")
+        
+        if baseline_times and proposed_times:
+            avg_improvement = (np.mean(baseline_times) - np.mean(proposed_times)) / np.mean(baseline_times) * 100
+            print(f"\nAverage Improvement: {avg_improvement:.1f}%")
+        
+        print("="*60 + "\n")
         
     def generate_figure(self, save_path='comparison_figure.pdf'):
         """Generate the complete 2x3 comparison figure"""
@@ -594,7 +593,7 @@ class ComparisonFigureGenerator:
         self.plot_control_authority_panel(ax2, self.data['baseline_50'], self.data['proposed_50'],
                                           50, '(b) Control Authority (50%)')
         self.plot_distance_to_harbor_panel(ax3, self.data['baseline_50'], self.data['proposed_50'],
-                                           '(c) Distance to Harbor (50%)')
+                                           '(c) Distance to Harbor (50%)', scenario_label='50% Degradation')
         
         # Row 2: 95% Degradation
         ax4 = fig.add_subplot(gs[1, 0])
@@ -606,9 +605,10 @@ class ComparisonFigureGenerator:
         self.plot_control_authority_panel(ax5, self.data['baseline_95'], self.data['proposed_95'],
                                           95, '(e) Control Authority (95%)')
         self.plot_distance_to_harbor_panel(ax6, self.data['baseline_95'], self.data['proposed_95'],
-                                           '(f) Distance to Harbor (95%)')
+                                           '(f) Distance to Harbor (95%)', scenario_label='95% Degradation')
         
-        # NO MAIN TITLE - will be in LaTeX caption instead
+        # Print mission times after processing all data
+        self.print_mission_times()
         
         # Save figure
         plt.savefig(save_path, dpi=300, bbox_inches='tight')

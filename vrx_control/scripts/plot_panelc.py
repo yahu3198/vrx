@@ -26,12 +26,12 @@ class PanelCGenerator:
         plt.rcParams['xtick.labelsize'] = 12
         plt.rcParams['ytick.labelsize'] = 12
         
-        fig, ax = plt.subplots(figsize=(5, 7), dpi=150)  # Was (8, 8)
+        fig, ax = plt.subplots(figsize=(5, 7), dpi=150)
         ax.set_aspect('equal')
         
         # TIGHTER plot limits to focus on important area
-        ax.set_xlim(-250, -190)  # Reduced from (-270, -170)
-        ax.set_ylim(-615, -515)  # Reduced from (-620, -520)
+        ax.set_xlim(-250, -190)
+        ax.set_ylim(-615, -515)
         
         # 1. Create wave field background (rotated)
         self._draw_wave_field_rotated(ax)
@@ -80,7 +80,7 @@ class PanelCGenerator:
     def _draw_wave_field_rotated(self, ax):
         """Draw wave height field as background (rotated) with INSET colorbar"""
         # Create grid in rotated space
-        x = np.linspace(-260, -180, 40)  # Adjusted for tighter limits
+        x = np.linspace(-260, -180, 40)
         y = np.linspace(-615, -510, 40)
         X, Y = np.meshgrid(x, y)
         
@@ -101,7 +101,7 @@ class PanelCGenerator:
         ax.contour(X, Y, Z, levels=[-1.0, -0.5], colors='red', 
                   alpha=0.15, linewidths=0.8)
         
-        # Create inset axes for colorbar - simpler approach
+        # Create inset axes for colorbar
         axins = inset_axes(ax, 
                           width="40%",
                           height="3%", 
@@ -118,7 +118,7 @@ class PanelCGenerator:
     def _draw_wind_field_rotated(self, ax):
         """Draw wind vector field (rotated and shorter arrows)"""
         # Create sparser grid for cleaner look
-        x_wind = np.linspace(-250, -190, 6)  # Reduced from 6 to 5
+        x_wind = np.linspace(-250, -190, 6)
         y_wind = np.linspace(-610, -520, 6)
         X_wind, Y_wind = np.meshgrid(x_wind, y_wind)
         
@@ -126,7 +126,7 @@ class PanelCGenerator:
         force_angle = np.radians(self.wind_direction - 180 - 90)
         
         # SHORTER arrows with better visibility
-        arrow_scale = 0.25  # Reduced for cleaner look
+        arrow_scale = 0.25
         U = np.ones_like(X_wind) * np.cos(force_angle) * self.wind_speed / 10 * arrow_scale
         V = np.ones_like(Y_wind) * np.sin(force_angle) * self.wind_speed / 10 * arrow_scale
         
@@ -144,10 +144,10 @@ class PanelCGenerator:
                  label=f'Wind')
     
     def _draw_usv_with_forces_rotated(self, ax, usv_x, usv_y):
-        """Draw USV with acting forces (rotated) - LARGER and clearer"""
+        """Draw USV with acting forces (rotated) - FIXED LEFT-POINTING FORCES"""
         # Draw LARGER USV body
-        usv_length = 15  # Increased from 12
-        usv_width = 8    # Increased from 6
+        usv_length = 15
+        usv_width = 8
         
         usv = Rectangle((usv_x - usv_width/2, usv_y - usv_length/2), 
                        usv_width, usv_length,
@@ -156,20 +156,25 @@ class PanelCGenerator:
         ax.add_patch(usv)
         
         # Draw coordinate frame with larger arrows
-        ax.arrow(usv_x, usv_y, 0, -12, head_width=2.5, head_length=2.5,
-                fc='red', ec='darkred', alpha=0.6, linewidth=2)
-        ax.text(usv_x, usv_y - 15, 'x', fontsize=12, color='red', weight='bold')
+        # ax.arrow(usv_x, usv_y, 0, -12, head_width=2.5, head_length=2.5,
+        #         fc='red', ec='darkred', alpha=0.6, linewidth=2)
+        # ax.text(usv_x, usv_y - 15, 'x', fontsize=12, color='red', weight='bold')
         
-        ax.arrow(usv_x, usv_y, 12, 0, head_width=2.5, head_length=2.5,
-                fc='green', ec='darkgreen', alpha=0.6, linewidth=2)
-        ax.text(usv_x + 15, usv_y, 'y', fontsize=12, color='green', weight='bold')
+        # ax.arrow(usv_x, usv_y, 12, 0, head_width=2.5, head_length=2.5,
+        #         fc='green', ec='darkgreen', alpha=0.6, linewidth=2)
+        # ax.text(usv_x + 15, usv_y, 'y', fontsize=12, color='green', weight='bold')
         
-        # Calculate force magnitudes (scaled for visualization)
-        wind_force_angle = np.radians(self.wind_direction - 180 - 90)
-        wave_force_angle = np.radians(self.wave_direction - 180 - 90)
+        # FIXED: Forces push USV, so they point in OPPOSITE direction of where they come FROM
+        # Wind FROM 135° means force points TO -45° (or 315°)
+        # After rotation of -90°: -45° - 90° = -135°
+        wind_force_angle = np.radians(-45 - 90)
+        
+        # Waves FROM 120° means force points TO -60° (or 300°)  
+        # After rotation of -90°: -60° - 90° = -150°
+        wave_force_angle = np.radians(-60 - 90)
         
         # LARGER force arrows for better visibility
-        force_scale = 1.2  # Increased from 0.8
+        force_scale = 1.2
         wind_fx = 18 * np.cos(wind_force_angle) * force_scale
         wind_fy = 18 * np.sin(wind_force_angle) * force_scale
         
@@ -194,7 +199,7 @@ class PanelCGenerator:
                 label='Resultant Force')
         
         # Add LARGER yaw moment indicator
-        moment_radius = 18  # Increased from 15
+        moment_radius = 18
         moment_arc = Circle((usv_x, usv_y), moment_radius, 
                            fill=False, ec='purple', 
                            linewidth=2.5, linestyle=':', alpha=0.7)
@@ -213,28 +218,6 @@ class PanelCGenerator:
     
     def _add_annotations(self, ax):
         """Add key annotations and legend with LARGER text"""
-        # Virtual actuator explanation box with larger text
-        # explanation_text = (
-        #     "Virtual Actuator Effect:\n"
-        #     "• ~15° force misalignment \n    → Yaw moment\n"
-        #     "• Wind: 6.5 m/s from ~135°\n"
-        #     "• Waves: 7s period from ~120°\n"
-        #     "• Sea State 4 (Moderate)"
-        # )
-        
-        # props = dict(boxstyle='round,pad=0.5', facecolor='lightyellow', 
-        #             alpha=0.95, edgecolor='black', linewidth=1.5)
-        # ax.text(0.02, 0.98, explanation_text, transform=ax.transAxes,
-        #        fontsize=11, va='top', bbox=props, weight='normal')
-        
-        # Add equation in bottom left (more visible) - FIXED LaTeX
-        # Using mathbf instead of boldsymbol, and mathrm instead of text
-        # equation_text = r'$\mathbf{\tau}_{eff} = \mathbf{B}\mathbf{H}\mathbf{u} + \mathrm{diag}(\mathbf{\alpha})\mathbf{w}$'
-        # eq_props = dict(boxstyle='round,pad=0.4', facecolor='white', 
-        #                alpha=0.95, edgecolor='black', linewidth=1.5)
-        # ax.text(0.02, 0.02, equation_text, transform=ax.transAxes,
-        #        fontsize=12, bbox=eq_props, weight='bold')
-        
         # Legend with larger font
         ax.legend(loc='lower right', fontsize=11, framealpha=0.95,
                  edgecolor='black', frameon=True)
@@ -245,5 +228,5 @@ class PanelCGenerator:
 
 if __name__ == "__main__":
     generator = PanelCGenerator()
-    fig, ax = generator.generate_panel_c('icra_figure1_panel_c.pdf')
+    fig, ax = generator.generate_panel_c('icra_figure1_panel_c_fixed.pdf')
     plt.show()

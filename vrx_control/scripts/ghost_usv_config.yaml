@@ -1,0 +1,34 @@
+# Ghost USV Configuration - 5 poses from trajectory
+# Generated from bag file analysis
+
+models:
+  - name: "wamv_ghost_1"
+    type: "wam-v"
+    static: true
+    pose: [-542.308, 221.891, -0.323, 0, 0, -0.008]
+    # Time: t=15.0s (t+0s after fault)
+
+  - name: "wamv_ghost_2"
+    type: "wam-v"
+    static: true
+    pose: [-541.610, 225.699, -0.110, 0, 0, -2.662]
+    # Time: t=42.6s (t+28s after fault)
+
+  - name: "wamv_ghost_3"
+    type: "wam-v"
+    static: true
+    pose: [-550.922, 223.079, -0.057, 0, 0, -2.321]
+    # Time: t=70.2s (t+55s after fault)
+
+  - name: "wamv_ghost_4"
+    type: "wam-v"
+    static: true
+    pose: [-560.867, 218.716, -0.178, 0, 0, -2.413]
+    # Time: t=97.9s (t+83s after fault)
+
+  - name: "wamv_ghost_5"
+    type: "wam-v"
+    static: true
+    pose: [-571.366, 216.734, 0.063, 0, 0, 1.979]
+    # Time: t=125.5s (t+110s after fault)
+

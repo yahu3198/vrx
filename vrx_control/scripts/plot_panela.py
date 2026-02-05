@@ -169,7 +169,7 @@ class PanelAGenerator:
             
             center = dock_rotated[:-1].mean(axis=0)
             ax.text(center[0], center[1], f'Dock {i+1}',
-                fontsize=9, ha='center', va='center', color='darkred', alpha=0.8)
+                fontsize=11, weight='bold', ha='center', va='center', color='darkred', alpha=0.8)
         
         # 3. Rotate trajectory coordinates
         traj_x_rot, traj_y_rot = rotate_coords(trajectory['x'].values, trajectory['y'].values)

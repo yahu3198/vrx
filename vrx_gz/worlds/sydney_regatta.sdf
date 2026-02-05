@@ -708,14 +708,14 @@
       
       <!-- Wind FROM 190° (SSW) instead of pure 180° -->
       <!-- This 10° offset creates asymmetric loading → yaw moment -->
-      <wind_direction>145</wind_direction>       
+      <wind_direction>250</wind_direction>       
       
       <!-- Strong wind for better control authority -->
-      <wind_mean_velocity>6.5</wind_mean_velocity>
+      <wind_mean_velocity>13</wind_mean_velocity>
       
       <!-- Higher variability creates periodic yaw moments -->
       <var_wind_gain_constants>0.4</var_wind_gain_constants>
-      <var_wind_time_constants>8</var_wind_time_constants>  
+      <var_wind_time_constants>9</var_wind_time_constants>  
       
       <random_seed>42</random_seed>              
       <update_rate>20</update_rate>              
@@ -735,7 +735,7 @@
           <key>direction</key>
           <value>
             <type>DOUBLE</type>
-            <double_value>130.0</double_value>
+            <double_value>245.0</double_value>
           </value>
         </params>
         

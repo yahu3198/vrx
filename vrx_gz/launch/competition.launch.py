@@ -35,6 +35,7 @@ def launch(context, *args, **kwargs):
     gz_paused = LaunchConfiguration('paused').perform(context).lower() == 'true'
     competition_mode = LaunchConfiguration('competition_mode').perform(context).lower() == 'true'
     extra_gz_args = LaunchConfiguration('extra_gz_args').perform(context)
+    num_usvs = int(LaunchConfiguration('num_usvs').perform(context))
 
     launch_processes = []
 
@@ -43,10 +44,24 @@ def launch(context, *args, **kwargs):
         with open(config_file, 'r') as stream:
             models = Model.FromConfig(stream)
     else:
-      m = Model('wamv', 'wam-v', [-560, 220, 0, 0, 0, 0])
-      if robot_urdf and robot_urdf != '':
-          m.set_urdf(robot_urdf)
-      models.append(m)
+        # Create multiple USVs with different positions
+        # Define spawn positions for multiple USVs
+        usv_positions = [
+            [-542.31, 221.89, -0.32, 0, 0, -0.008],      # USV 1 (original position)
+            [-541.61, 225.70, -0.11, 0, 0, -2.662],      # USV 2
+            [-550.92, 223.08, -0.06, 0, 0, -2.321],      # USV 3
+            [-560.87, 218.72, -0.18, 0, 0, -2.413],      # USV 4
+            [-571.37, 216.73, 0.06, 0, 0, 1.979],      # USV 5
+        ]
+        
+        # Spawn the requested number of USVs
+        for i in range(min(num_usvs, len(usv_positions))):
+            # Create unique model name for each USV
+            model_name = f'wamv_{i+1}' if num_usvs > 1 else 'wamv'
+            m = Model(model_name, 'wam-v', usv_positions[i])
+            if robot_urdf and robot_urdf != '':
+                m.set_urdf(robot_urdf)
+            models.append(m)
 
     world_name, ext = os.path.splitext(world_name)
     launch_processes.extend(vrx_gz.launch.simulation(world_name, headless, 
@@ -107,5 +122,9 @@ def generate_launch_description():
             'extra_gz_args',
             default_value='',
             description='Additional arguments to be passed to gz sim. '),
+        DeclareLaunchArgument(
+            'num_usvs',
+            default_value='1',
+            description='Number of USVs to spawn (1-5). '),
         OpaqueFunction(function=launch),
     ])

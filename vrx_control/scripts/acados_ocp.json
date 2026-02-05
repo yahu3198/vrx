@@ -631,7 +631,7 @@
         "zu_e": []
     },
     "cython_include_dirs": [
-        "/usr/lib/python3/dist-packages/numpy/core/include",
+        "/home/yang/.local/lib/python3.10/site-packages/numpy/core/include",
         "/usr/include/python3.10"
     ],
     "dims": {
