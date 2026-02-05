@@ -1,0 +1,1 @@
+ros2 bag record -o imu_2 /wamv/sensors/gps/gps/fix /wamv/sensors/gps/gps/fix_faulty /wamv/sensors/imu/imu/data /wamv/sensors/imu/imu/data_faulty /wamv/sensors/position/ground_truth_odometry

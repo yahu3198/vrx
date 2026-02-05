@@ -25,6 +25,7 @@ class BaseFaultInjectionNode(Node, ABC):
     - Fault enable/disable
     - Stuck-at-fault implementation
     - Dropout/outage implementation
+    - Degraded rate implementation
     - Time management
     
     Subclasses must implement:
@@ -52,6 +53,13 @@ class BaseFaultInjectionNode(Node, ABC):
         self.in_outage: bool = False
         self.outage_start_time: Optional[float] = None
         
+        # Degraded rate state
+        self.degraded_rate_active: bool = False
+        self.degraded_rate_start_time: Optional[float] = None
+        self.message_skip_counter: int = 0
+        self.degraded_rate_messages_published: int = 0
+        self.degraded_rate_messages_skipped: int = 0
+        
         # Last valid message
         self.last_valid_msg: Optional[Any] = None
         
@@ -78,6 +86,18 @@ class BaseFaultInjectionNode(Node, ABC):
         # ----- Common Stuck-at-Fault Parameters -----
         self.declare_parameter('stuck.duration_sec', 5.0)
         self.declare_parameter('stuck.trigger_time', 10.0)
+        
+        # ----- Common Degraded Rate Parameters -----
+        # Target rate as fraction of original (0.5 = half rate, 0.25 = quarter rate)
+        self.declare_parameter('degraded_rate.rate_factor', 0.5)
+        # Or specify target frequency directly (Hz), set to 0 to use rate_factor
+        self.declare_parameter('degraded_rate.target_frequency_hz', 0.0)
+        # When to start degraded rate (sim time in seconds)
+        self.declare_parameter('degraded_rate.trigger_time', 15.0)
+        # How long degraded rate lasts (seconds), 0 = permanent until disabled
+        self.declare_parameter('degraded_rate.duration_sec', 10.0)
+        # Mode: 'periodic' (regular skipping) or 'random' (probabilistic dropping)
+        self.declare_parameter('degraded_rate.mode', 'periodic')
     
     @abstractmethod
     def _declare_sensor_specific_parameters(self):
@@ -85,8 +105,13 @@ class BaseFaultInjectionNode(Node, ABC):
         pass
     
     @abstractmethod
-    def _apply_sensor_specific_fault(self, msg: Any, fault_type: int) -> Any:
-        """Apply sensor-specific fault. Must be implemented by subclass."""
+    def _apply_sensor_specific_fault(self, msg: Any, fault_type: int) -> tuple:
+        """
+        Apply sensor-specific fault. Must be implemented by subclass.
+        
+        Returns:
+            Tuple of (faulty_msg, should_publish)
+        """
         pass
     
     @abstractmethod
@@ -115,6 +140,11 @@ class BaseFaultInjectionNode(Node, ABC):
         self.stuck_start_time = None
         self.in_outage = False
         self.outage_start_time = None
+        self.degraded_rate_active = False
+        self.degraded_rate_start_time = None
+        self.message_skip_counter = 0
+        self.degraded_rate_messages_published = 0
+        self.degraded_rate_messages_skipped = 0
         self.get_logger().debug('Fault state reset')
     
     def get_current_time(self) -> float:
@@ -127,7 +157,7 @@ class BaseFaultInjectionNode(Node, ABC):
             return 0.0
         return self.get_current_time() - self.start_time
     
-    def process_message(self, msg: Any, fault_type_enum: int) -> Any:
+    def process_message(self, msg: Any, fault_type_enum: int) -> tuple:
         """
         Common message processing logic.
         
@@ -136,7 +166,7 @@ class BaseFaultInjectionNode(Node, ABC):
             fault_type_enum: Integer fault type value
             
         Returns:
-            Processed message (with or without fault)
+            Tuple of (processed_msg, should_publish)
         """
         # Initialize start time on first message
         if self.start_time is None:
@@ -151,7 +181,7 @@ class BaseFaultInjectionNode(Node, ABC):
         fault_enabled = self.get_parameter('fault_enabled').value
         
         if not fault_enabled or fault_type_enum == 0:  # 0 = NONE for all sensors
-            return msg
+            return msg, True
         
         # Apply the sensor-specific fault
         return self._apply_sensor_specific_fault(msg, fault_type_enum)
@@ -160,7 +190,7 @@ class BaseFaultInjectionNode(Node, ABC):
     # Common Fault Implementations
     # ================================================================
     
-    def apply_stuck_fault(self, msg: Any, update_header_func=None) -> Any:
+    def apply_stuck_fault(self, msg: Any, update_header_func=None) -> tuple:
         """
         Apply stuck-at-fault (common to all sensors).
         
@@ -173,7 +203,7 @@ class BaseFaultInjectionNode(Node, ABC):
             update_header_func: Optional function to update header timestamp
             
         Returns:
-            Stuck message or original message
+            Tuple of (faulty_msg, should_publish)
         """
         current_time = self.get_current_time()
         elapsed_since_start = self.get_elapsed_time()
@@ -196,7 +226,7 @@ class BaseFaultInjectionNode(Node, ABC):
                 self.stuck_message = None
                 self.stuck_start_time = None
                 self.get_logger().info(f'Stuck-at-fault ended after {duration}s')
-                return msg
+                return msg, True
             
             # Return stuck message with updated timestamp
             faulty_msg = copy.deepcopy(self.stuck_message)
@@ -204,9 +234,9 @@ class BaseFaultInjectionNode(Node, ABC):
                 faulty_msg = update_header_func(faulty_msg, msg)
             elif hasattr(faulty_msg, 'header'):
                 faulty_msg.header.stamp = msg.header.stamp
-            return faulty_msg
+            return faulty_msg, True
         
-        return msg
+        return msg, True
     
     def apply_dropout(self, msg: Any, create_dropout_msg_func, 
                       mode: str = 'intermittent',
@@ -223,7 +253,7 @@ class BaseFaultInjectionNode(Node, ABC):
             duration: Duration of sustained outage
             
         Returns:
-            Tuple of (faulty_msg, is_dropout)
+            Tuple of (faulty_msg, should_publish)
         """
         current_time = self.get_current_time()
         
@@ -249,4 +279,90 @@ class BaseFaultInjectionNode(Node, ABC):
                     self.outage_start_time = None
                     self.get_logger().info('Sustained outage ended')
         
-        return msg, False
+        return msg, True
+    
+    def apply_degraded_rate(self, msg: Any) -> tuple:
+        """
+        Apply degraded update rate fault (common to all sensors).
+        
+        Simulates reduced sensor update frequency caused by:
+        - Computational overload
+        - Communication bus congestion
+        - Power saving mode
+        - Firmware issues
+        
+        Args:
+            msg: Current sensor message
+            
+        Returns:
+            Tuple of (message, should_publish)
+            - should_publish=False means skip this message
+        """
+        current_time = self.get_current_time()
+        elapsed = self.get_elapsed_time()
+        
+        trigger_time = self.get_parameter('degraded_rate.trigger_time').value
+        duration = self.get_parameter('degraded_rate.duration_sec').value
+        rate_factor = self.get_parameter('degraded_rate.rate_factor').value
+        mode = self.get_parameter('degraded_rate.mode').value
+        
+        # Check if we should start degraded rate
+        if not self.degraded_rate_active and elapsed >= trigger_time:
+            self.degraded_rate_active = True
+            self.degraded_rate_start_time = current_time
+            self.message_skip_counter = 0
+            self.degraded_rate_messages_published = 0
+            self.degraded_rate_messages_skipped = 0
+            self.get_logger().info(
+                f'Degraded rate fault triggered: {rate_factor*100:.0f}% of original rate'
+            )
+        
+        # Check if degraded rate should end (duration > 0 means it has a limit)
+        if self.degraded_rate_active and duration > 0:
+            degraded_elapsed = current_time - self.degraded_rate_start_time
+            if degraded_elapsed >= duration:
+                self.degraded_rate_active = False
+                total_msgs = self.degraded_rate_messages_published + self.degraded_rate_messages_skipped
+                actual_rate = self.degraded_rate_messages_published / total_msgs if total_msgs > 0 else 0
+                self.get_logger().info(
+                    f'Degraded rate fault ended. '
+                    f'Published: {self.degraded_rate_messages_published}, '
+                    f'Skipped: {self.degraded_rate_messages_skipped}, '
+                    f'Actual rate: {actual_rate*100:.1f}%'
+                )
+                self.degraded_rate_start_time = None
+                return msg, True
+        
+        # Apply degraded rate if active
+        if self.degraded_rate_active:
+            should_publish = False
+            
+            if mode == 'periodic':
+                # Periodic skipping: publish every N-th message
+                # rate_factor=0.5 means publish every 2nd message (skip_interval=2)
+                # rate_factor=0.25 means publish every 4th message (skip_interval=4)
+                if rate_factor > 0:
+                    skip_interval = int(round(1.0 / rate_factor))
+                else:
+                    skip_interval = 1000000  # Effectively skip all
+                
+                self.message_skip_counter += 1
+                
+                if self.message_skip_counter >= skip_interval:
+                    self.message_skip_counter = 0
+                    should_publish = True
+            
+            elif mode == 'random':
+                # Random dropping: probabilistic based on rate_factor
+                if np.random.random() < rate_factor:
+                    should_publish = True
+            
+            # Update statistics
+            if should_publish:
+                self.degraded_rate_messages_published += 1
+            else:
+                self.degraded_rate_messages_skipped += 1
+            
+            return msg, should_publish
+        
+        return msg, True

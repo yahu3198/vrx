@@ -487,12 +487,12 @@ void WAMV_MPC::solve()
     acados_out.kkt_res = (double)mpc_capsule->nlp_out->inf_norm_res;
 
     // ocp_nlp_get(mpc_capsule->nlp_config, mpc_capsule->nlp_solver, "time_tot", &acados_out.cpu_time);
-    ocp_nlp_get(mpc_capsule->nlp_solver, "time_tot", &acados_out.cpu_time);
+    // ocp_nlp_get(mpc_capsule->nlp_solver, "time_tot", &acados_out.cpu_time);
 
-    ocp_nlp_out_get(mpc_capsule->nlp_config, mpc_capsule->nlp_dims, mpc_capsule->nlp_out, 0, "u", (void *)acados_out.u0);
+    // ocp_nlp_out_get(mpc_capsule->nlp_config, mpc_capsule->nlp_dims, mpc_capsule->nlp_out, 0, "u", (void *)acados_out.u0);
 
-    // acados_out.u0[0] = 200;
-    // acados_out.u0[1] = 200;
+    acados_out.u0[0] = 100;
+    acados_out.u0[1] = 100;
     
     publish_cin(acados_out.u0[0], acados_out.u0[1]);
     

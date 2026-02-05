@@ -10,8 +10,8 @@
     fault diagnosis algorithms in maritime environments.
     
     Supported Sensors and Fault Types:
-    - GPS: Outage/Dropout, Jump/Step Error, Stuck-at-Fault, Multipath
-    - IMU: Stuck-at-Fault, Saturation
+    - GPS: Outage/Dropout, Jump/Step Error, Stuck-at-Fault, Multipath, Degraded Rate
+    - IMU: Stuck-at-Fault, Saturation, Degraded Rate
   </description>
   
   <maintainer email="your-email@example.com">Your Name</maintainer>

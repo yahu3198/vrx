@@ -4,6 +4,15 @@ Launch file for IMU Fault Injection Node only
 Usage:
     ros2 launch sensor_fault_injection imu_fault.launch.py
     ros2 launch sensor_fault_injection imu_fault.launch.py fault_enabled:=true fault_type:=2
+
+    # With degraded rate fault
+    ros2 launch sensor_fault_injection imu_fault.launch.py fault_enabled:=true fault_type:=3
+
+Fault Types:
+    0 = None (pass-through)
+    1 = Stuck (frozen readings)
+    2 = Saturation (clipped values)
+    3 = Degraded Rate (reduced frequency)
 """
 
 import os
@@ -39,7 +48,7 @@ def generate_launch_description():
     declare_fault_type = DeclareLaunchArgument(
         'fault_type',
         default_value='0',
-        description='Fault type: 0=None, 1=Stuck, 2=Saturation'
+        description='Fault type: 0=None, 1=Stuck, 2=Saturation, 3=DegradedRate'
     )
     
     declare_fault_enabled = DeclareLaunchArgument(

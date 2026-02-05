@@ -10,11 +10,20 @@ Usage:
         gps_fault_enabled:=true gps_fault_type:=4 \
         imu_fault_enabled:=true imu_fault_type:=2
 
+    # Launch with degraded rate fault
+    ros2 launch sensor_fault_injection all_faults.launch.py \
+        gps_fault_enabled:=true gps_fault_type:=5 \
+        imu_fault_enabled:=true imu_fault_type:=3
+
     # Launch only GPS
     ros2 launch sensor_fault_injection all_faults.launch.py enable_imu:=false
 
     # Launch only IMU
     ros2 launch sensor_fault_injection all_faults.launch.py enable_gps:=false
+
+Fault Types:
+    GPS: 0=None, 1=Outage, 2=Jump, 3=Stuck, 4=Multipath, 5=DegradedRate
+    IMU: 0=None, 1=Stuck, 2=Saturation, 3=DegradedRate
 """
 
 import os
@@ -73,7 +82,7 @@ def generate_launch_description():
     declare_gps_fault_type = DeclareLaunchArgument(
         'gps_fault_type',
         default_value='0',
-        description='GPS fault type: 0=None, 1=Outage, 2=Jump, 3=Stuck, 4=Multipath'
+        description='GPS fault type: 0=None, 1=Outage, 2=Jump, 3=Stuck, 4=Multipath, 5=DegradedRate'
     )
     
     declare_gps_fault_enabled = DeclareLaunchArgument(
@@ -98,7 +107,7 @@ def generate_launch_description():
     declare_imu_fault_type = DeclareLaunchArgument(
         'imu_fault_type',
         default_value='0',
-        description='IMU fault type: 0=None, 1=Stuck, 2=Saturation'
+        description='IMU fault type: 0=None, 1=Stuck, 2=Saturation, 3=DegradedRate'
     )
     
     declare_imu_fault_enabled = DeclareLaunchArgument(

@@ -12,11 +12,12 @@
 # =============================================================================
 #
 # Fault Types:
-#   0 = NONE      : No fault injection (pass-through)
-#   1 = OUTAGE    : Complete signal loss / dropout
-#   2 = JUMP      : Instantaneous position offset
-#   3 = STUCK     : Frozen sensor readings
-#   4 = MULTIPATH : Oscillating correlated errors
+#   0 = NONE          : No fault injection (pass-through)
+#   1 = OUTAGE        : Complete signal loss / dropout
+#   2 = JUMP          : Instantaneous position offset
+#   3 = STUCK         : Frozen sensor readings
+#   4 = MULTIPATH     : Oscillating correlated errors
+#   5 = DEGRADED_RATE : Reduced update frequency
 #
 # =============================================================================
 
@@ -39,8 +40,8 @@ gps_fault_injection_node:
     # Stuck-at-Fault Parameters (Common)
     # ---------------------------------------------------------
     stuck:
-      duration_sec: 5.0
-      trigger_time: 10.0
+      duration_sec: 3.0
+      trigger_time: 1.0
     
     # ---------------------------------------------------------
     # Outage/Dropout Parameters
@@ -68,11 +69,11 @@ gps_fault_injection_node:
     #   - Kalman filter reset
     #
     jump:
-      offset_lat: 0.0001      # degrees (~11m)
-      offset_lon: 0.0001      # degrees (~11m)
+      offset_lat: 0.00001      # degrees (~1.1m)
+      offset_lon: 0.00001      # degrees (~1.1m)
       offset_alt: 5.0         # meters
       probability: 0.05
-      persistent: true
+      persistent: false
     
     # ---------------------------------------------------------
     # Multipath Parameters
@@ -85,10 +86,39 @@ gps_fault_injection_node:
     #   - Reflection from large vessels
     #
     multipath:
-      amplitude_m: 5.0
+      amplitude_m: 1.0
       frequency_hz: 0.2
       phase_offset: 0.0
       noise_stddev: 1.0
+    
+    # ---------------------------------------------------------
+    # Degraded Rate Parameters
+    # ---------------------------------------------------------
+    # Simulates reduced sensor update frequency
+    #
+    # Real-world causes:
+    #   - Receiver computational overload
+    #   - Poor satellite geometry causing slower fix computation
+    #   - Power saving mode activation
+    #   - Communication bus congestion
+    #   - Firmware issues
+    #
+    # Impact on navigation:
+    #   - Kalman filters degrade with inconsistent timing
+    #   - Dead reckoning accumulates more error
+    #   - Sensor fusion timing synchronization issues
+    #
+    degraded_rate:
+      # Target rate as fraction of original (0.5 = half rate, 0.25 = quarter)
+      rate_factor: 0.5
+      # Or specify target frequency directly (Hz), set to 0 to use rate_factor
+      target_frequency_hz: 0.0
+      # When to start degraded rate (sim time in seconds)
+      trigger_time: 15.0
+      # How long degraded rate lasts (seconds), 0 = permanent
+      duration_sec: 10.0
+      # Mode: 'periodic' (regular skipping) or 'random' (probabilistic)
+      mode: "periodic"
 
 
 # =============================================================================
@@ -96,9 +126,10 @@ gps_fault_injection_node:
 # =============================================================================
 #
 # Fault Types:
-#   0 = NONE       : No fault injection (pass-through)
-#   1 = STUCK      : Frozen sensor readings
-#   2 = SATURATION : Output clipped at max/min values
+#   0 = NONE          : No fault injection (pass-through)
+#   1 = STUCK         : Frozen sensor readings
+#   2 = SATURATION    : Output clipped at max/min values
+#   3 = DEGRADED_RATE : Reduced update frequency
 #
 # Note: VRX IMU already has comprehensive noise modeling including:
 #   - Gaussian noise
@@ -128,8 +159,8 @@ imu_fault_injection_node:
     # Stuck-at-Fault Parameters (Common)
     # ---------------------------------------------------------
     stuck:
-      duration_sec: 5.0
-      trigger_time: 10.0
+      duration_sec: 3.0
+      trigger_time: 5.0
     
     # ---------------------------------------------------------
     # Saturation Parameters
@@ -162,3 +193,142 @@ imu_fault_injection_node:
         max_y: 19.6           # m/s²
         max_z: 19.6           # m/s²
       log_events: true
+    
+    # ---------------------------------------------------------
+    # Degraded Rate Parameters
+    # ---------------------------------------------------------
+    # Simulates reduced sensor update frequency
+    #
+    # Real-world causes:
+    #   - Sensor internal processing delays
+    #   - I2C/SPI bus contention
+    #   - DMA transfer issues
+    #   - Power supply fluctuations
+    #   - Temperature-related timing drift
+    #   - Embedded processor overload
+    #
+    # Impact on navigation:
+    #   - Kalman filters degrade with inconsistent timing
+    #   - Dead reckoning accumulates more error
+    #   - Control loops may become unstable
+    #
+    degraded_rate:
+      # Target rate as fraction of original (0.5 = half rate, 0.25 = quarter)
+      rate_factor: 0.25
+      # Or specify target frequency directly (Hz), set to 0 to use rate_factor
+      target_frequency_hz: 0.0
+      # When to start degraded rate (sim time in seconds)
+      trigger_time: 20.0
+      # How long degraded rate lasts (seconds), 0 = permanent
+      duration_sec: 8.0
+      # Mode: 'periodic' (regular skipping) or 'random' (probabilistic)
+      mode: "random"
+
+# =============================================================================
+# LiDAR Fault Injection Configuration
+# =============================================================================
+#
+# Fault Types:
+#   0 = NONE           : No fault injection (pass-through)
+#   1 = INCREASED_NOISE: Noise amplitude increased (rain, fog, spray, dust)
+#   2 = REDUCED_RANGE  : Max detection distance decreased (fog, rain, dirty lens)
+#   3 = STUCK          : Frozen point cloud readings (hardware failure)
+#
+# =============================================================================
+
+lidar_fault_injection_node:
+  ros__parameters:
+    
+    # ---------------------------------------------------------
+    # Topic Configuration
+    # ---------------------------------------------------------
+    input_topic: "/wamv/sensors/lidars/lidar_wamv/points"
+    output_topic: "/wamv/sensors/lidars/lidar_wamv/points_faulty"
+    
+    # ---------------------------------------------------------
+    # Fault Selection
+    # ---------------------------------------------------------
+    fault_type: 0
+    fault_enabled: false
+    
+    # ---------------------------------------------------------
+    # Increased Noise Parameters
+    # ---------------------------------------------------------
+    # Simulates degraded point cloud quality
+    #
+    # Real-world causes:
+    #   - Rain droplets scattering laser beams
+    #   - Fog particles causing diffuse reflection
+    #   - Sea spray in maritime environments
+    #   - Dust particles
+    #   - Sensor degradation over time
+    #
+    # Effects on navigation:
+    #   - Object detection becomes unreliable
+    #   - SLAM accuracy degrades
+    #   - False obstacle detections
+    #
+    noise:
+      # Factor to multiply noise amplitude
+      # 1.0 = no change, 2.0 = double noise, 5.0 = 5x noise
+      noise_multiplier: 2.0
+      # Additional Gaussian noise added to each point (meters)
+      additional_noise_stddev: 0.05
+      # Also add noise to intensity values
+      affect_intensity: true
+      # Intensity noise standard deviation
+      intensity_noise_stddev: 10.0
+    
+    # ---------------------------------------------------------
+    # Reduced Range Parameters
+    # ---------------------------------------------------------
+    # Simulates decreased detection distance
+    #
+    # Real-world causes:
+    #   - Fog attenuating laser beam
+    #   - Heavy rain absorbing laser energy
+    #   - Dirty or obscured lens
+    #   - Low reflectivity targets
+    #   - Sensor power degradation
+    #
+    # Effects on navigation:
+    #   - Obstacles detected too late
+    #   - Map completeness reduced
+    #   - Navigation in tight spaces becomes dangerous
+    #
+    reduced_range:
+      # Maximum detection range (meters)
+      # Points beyond this distance are removed
+      max_range: 50.0
+      # Noise added to range threshold (creates soft boundary)
+      range_noise_stddev: 2.0
+      # Remove points with intensity below this threshold
+      # Simulates weak returns being lost in fog/rain
+      min_intensity_threshold: 0.0
+      # Use gradual falloff instead of hard cutoff
+      gradual_falloff: true
+      # Start falloff at this fraction of max_range (0.8 = 80%)
+      falloff_start: 0.8
+    
+    # ---------------------------------------------------------
+    # Stuck-at-Fault Parameters
+    # ---------------------------------------------------------
+    # Simulates hardware failure where point cloud freezes
+    #
+    # Real-world causes:
+    #   - Hardware failure (motor, laser, receiver)
+    #   - Firmware crash
+    #   - Communication buffer stuck
+    #   - Processing pipeline frozen
+    #   - Memory corruption
+    #
+    # Effects:
+    #   - Timestamp updates but point cloud doesn't
+    #   - Navigation sees static environment
+    #   - Collision avoidance fails for new obstacles
+    #
+    stuck:
+      duration_sec: 5.0
+      trigger_time: 10.0
+      # Also freeze the frame_id (transform reference)
+      freeze_transform: true

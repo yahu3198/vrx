@@ -711,10 +711,10 @@
       <wind_direction>250</wind_direction>       
       
       <!-- Strong wind for better control authority -->
-      <wind_mean_velocity>13</wind_mean_velocity>
+      <wind_mean_velocity>0</wind_mean_velocity>
       
       <!-- Higher variability creates periodic yaw moments -->
-      <var_wind_gain_constants>0.4</var_wind_gain_constants>
+      <var_wind_gain_constants>0</var_wind_gain_constants>
       <var_wind_time_constants>9</var_wind_time_constants>  
       
       <random_seed>42</random_seed>              
@@ -744,7 +744,7 @@
           <key>gain</key>
           <value>
             <type>DOUBLE</type>
-            <double_value>1.5</double_value>
+            <double_value>0</double_value>
           </value>
         </params>
         
@@ -762,7 +762,7 @@
           <key>steepness</key>
           <value>
             <type>DOUBLE</type>
-            <double_value>0.04</double_value>
+            <double_value>0</double_value>
           </value>
         </params>
         

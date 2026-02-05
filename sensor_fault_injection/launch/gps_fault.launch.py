@@ -2,13 +2,24 @@
 Launch file for GPS Fault Injection Node
 
 Usage:
-    ros2 launch gps_fault_injection gps_fault_injection.launch.py
+    ros2 launch sensor_fault_injection gps_fault.launch.py
 
     # With custom parameters
-    ros2 launch gps_fault_injection gps_fault_injection.launch.py fault_type:=1 fault_enabled:=true
+    ros2 launch sensor_fault_injection gps_fault.launch.py fault_type:=1 fault_enabled:=true
+
+    # With degraded rate fault
+    ros2 launch sensor_fault_injection gps_fault.launch.py fault_type:=5 fault_enabled:=true
 
     # With config file
-    ros2 launch gps_fault_injection gps_fault_injection.launch.py config_file:=/path/to/config.yaml
+    ros2 launch sensor_fault_injection gps_fault.launch.py config_file:=/path/to/config.yaml
+
+Fault Types:
+    0 = None (pass-through)
+    1 = Outage (signal loss)
+    2 = Jump (position offset)
+    3 = Stuck (frozen readings)
+    4 = Multipath (oscillating errors)
+    5 = Degraded Rate (reduced frequency)
 """
 
 import os
@@ -48,7 +59,7 @@ def generate_launch_description():
     declare_fault_type = DeclareLaunchArgument(
         'fault_type',
         default_value='0',
-        description='Fault type: 0=None, 1=Outage, 2=Jump, 3=Stuck, 4=Multipath'
+        description='Fault type: 0=None, 1=Outage, 2=Jump, 3=Stuck, 4=Multipath, 5=DegradedRate'
     )
     
     declare_fault_enabled = DeclareLaunchArgument(

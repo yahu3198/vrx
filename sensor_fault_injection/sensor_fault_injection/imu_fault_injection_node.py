@@ -3,9 +3,10 @@
 IMU Fault Injection Node for VRX USV Simulation
 
 This node subscribes to a clean IMU topic and republishes with injected faults.
-Supports 2 fault types:
+Supports 3 fault types:
     1. Stuck-at-Fault: Frozen sensor readings
     2. Saturation: Output clipped at max/min values
+    3. Degraded Rate: Reduced update frequency
 
 Note: The VRX IMU already has comprehensive noise modeling including:
     - Gaussian noise
@@ -24,6 +25,7 @@ from sensor_msgs.msg import Imu
 import numpy as np
 import copy
 
+# Use absolute imports for ROS 2 package
 from sensor_fault_injection.base_fault_node import BaseFaultInjectionNode
 from sensor_fault_injection.fault_types import IMUFaultType, IMU_FAULT_DESCRIPTIONS
 
@@ -102,18 +104,26 @@ class IMUFaultInjectionNode(BaseFaultInjectionNode):
     def _imu_callback(self, msg: Imu):
         """IMU message callback"""
         fault_type = self.get_parameter('fault_type').value
-        faulty_msg = self.process_message(msg, fault_type)
-        self.publisher.publish(faulty_msg)
-    
-    def _apply_sensor_specific_fault(self, msg: Imu, fault_type: int) -> Imu:
-        """Apply IMU-specific fault"""
+        faulty_msg, should_publish = self.process_message(msg, fault_type)
         
+        if should_publish:
+            self.publisher.publish(faulty_msg)
+    
+    def _apply_sensor_specific_fault(self, msg: Imu, fault_type: int) -> tuple:
+        """
+        Apply IMU-specific fault.
+        
+        Returns:
+            Tuple of (faulty_msg, should_publish)
+        """
         if fault_type == IMUFaultType.STUCK:
             return self.apply_stuck_fault(msg)
         elif fault_type == IMUFaultType.SATURATION:
-            return self._apply_saturation(msg)
+            return self._apply_saturation(msg), True
+        elif fault_type == IMUFaultType.DEGRADED_RATE:
+            return self.apply_degraded_rate(msg)
         else:
-            return msg
+            return msg, True
     
     # ================================================================
     # IMU Fault Implementation: Saturation

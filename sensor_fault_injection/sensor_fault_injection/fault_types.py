@@ -15,6 +15,7 @@ class GPSFaultType(IntEnum):
     JUMP = 2            # Instantaneous position offset
     STUCK = 3           # Frozen sensor readings
     MULTIPATH = 4       # Oscillating correlated errors
+    DEGRADED_RATE = 5   # Reduced update frequency
 
 
 class IMUFaultType(IntEnum):
@@ -22,6 +23,7 @@ class IMUFaultType(IntEnum):
     NONE = 0
     STUCK = 1           # Frozen sensor readings
     SATURATION = 2      # Output clipped at max/min values
+    DEGRADED_RATE = 3   # Reduced update frequency
 
 
 # Fault type descriptions for logging and documentation
@@ -31,10 +33,12 @@ GPS_FAULT_DESCRIPTIONS = {
     GPSFaultType.JUMP: "Instantaneous position offset",
     GPSFaultType.STUCK: "Frozen sensor readings",
     GPSFaultType.MULTIPATH: "Oscillating correlated errors",
+    GPSFaultType.DEGRADED_RATE: "Reduced update frequency",
 }
 
 IMU_FAULT_DESCRIPTIONS = {
     IMUFaultType.NONE: "No fault (pass-through)",
     IMUFaultType.STUCK: "Frozen sensor readings",
     IMUFaultType.SATURATION: "Output clipped at max/min values",
+    IMUFaultType.DEGRADED_RATE: "Reduced update frequency",
 }
