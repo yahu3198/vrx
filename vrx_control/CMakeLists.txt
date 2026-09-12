@@ -158,5 +158,9 @@ install(DIRECTORY launch
 install(DIRECTORY config
   DESTINATION share/${PROJECT_NAME}
 )
+# [manifold] preset approach leg resolved from the install space by mpc_manifold.launch.py
+install(DIRECTORY traj
+  DESTINATION share/${PROJECT_NAME}
+)
 
 ament_package()

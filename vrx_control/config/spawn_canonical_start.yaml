@@ -1,0 +1,15 @@
+# Spawn the WAM-V 130 m EAST of the recovery-manifold canonical start
+# (-459.5, 221), facing west. The preset approach leg then drives it west at
+# 0.8 m/s for ~170 s; the fault fires by position when x first reaches -459.5
+# (use_position_trigger), so the recovery starts at the canonical start at
+# speed, and the healthy leg is the disturbance-logging window.
+# yaw is 3.10 rad (not pi) so the extracted heading is +3.10 and the node's
+# continuous yaw and the preset reference agree in sign (a spawn at exactly pi
+# can read back as -3.14159 and produce a 2*pi reference error).
+# Use:  ros2 launch vrx_gz competition.launch.py world:=<trial world> \
+#         config_file:=$(ros2 pkg prefix vrx_control)/share/vrx_control/config/spawn_canonical_start.yaml
+- model_name: wamv
+  model_type: wam-v
+  position:
+    xyz: [-329.5, 221.0, -0.1]
+    rpy: [0.0, 0.0, 3.10]

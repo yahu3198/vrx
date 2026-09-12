@@ -242,8 +242,8 @@ lidar_fault_injection_node:
     # ---------------------------------------------------------
     # Topic Configuration
     # ---------------------------------------------------------
-    input_topic: "/wamv/sensors/lidars/lidar_wamv/points"
-    output_topic: "/wamv/sensors/lidars/lidar_wamv/points_faulty"
+    input_topic: "/wamv/sensors/lidars/lidar_wamv_sensor/points"
+    output_topic: "/wamv/sensors/lidars/lidar_wamv_sensor/points_faulty"
     
     # ---------------------------------------------------------
     # Fault Selection

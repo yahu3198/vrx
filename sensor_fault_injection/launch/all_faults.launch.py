@@ -1,5 +1,5 @@
 """
-Launch file for Sensor Fault Injection Nodes (GPS + IMU)
+Launch file for Sensor Fault Injection Nodes (GPS + IMU + LiDAR)
 
 Usage:
     # Launch all sensors
@@ -8,7 +8,8 @@ Usage:
     # Launch with faults enabled
     ros2 launch sensor_fault_injection all_faults.launch.py \
         gps_fault_enabled:=true gps_fault_type:=4 \
-        imu_fault_enabled:=true imu_fault_type:=2
+        imu_fault_enabled:=true imu_fault_type:=2 \
+        lidar_fault_enabled:=true lidar_fault_type:=1
 
     # Launch with degraded rate fault
     ros2 launch sensor_fault_injection all_faults.launch.py \
@@ -16,14 +17,18 @@ Usage:
         imu_fault_enabled:=true imu_fault_type:=3
 
     # Launch only GPS
-    ros2 launch sensor_fault_injection all_faults.launch.py enable_imu:=false
+    ros2 launch sensor_fault_injection all_faults.launch.py enable_imu:=false enable_lidar:=false
 
     # Launch only IMU
-    ros2 launch sensor_fault_injection all_faults.launch.py enable_gps:=false
+    ros2 launch sensor_fault_injection all_faults.launch.py enable_gps:=false enable_lidar:=false
+
+    # Launch only LiDAR
+    ros2 launch sensor_fault_injection all_faults.launch.py enable_gps:=false enable_imu:=false
 
 Fault Types:
     GPS: 0=None, 1=Outage, 2=Jump, 3=Stuck, 4=Multipath, 5=DegradedRate
     IMU: 0=None, 1=Stuck, 2=Saturation, 3=DegradedRate
+    LiDAR: 0=None, 1=IncreasedNoise, 2=ReducedRange, 3=Stuck
 """
 
 import os
@@ -64,6 +69,12 @@ def generate_launch_description():
         'enable_imu',
         default_value='true',
         description='Enable IMU fault injection node'
+    )
+    
+    declare_enable_lidar = DeclareLaunchArgument(
+        'enable_lidar',
+        default_value='true',
+        description='Enable LiDAR fault injection node'
     )
     
     # ----- GPS Arguments -----
@@ -116,6 +127,31 @@ def generate_launch_description():
         description='Enable IMU fault injection'
     )
     
+    # ----- LiDAR Arguments -----
+    declare_lidar_input_topic = DeclareLaunchArgument(
+        'lidar_input_topic',
+        default_value='/wamv/sensors/lidars/lidar_wamv_sensor/points',
+        description='LiDAR input topic (clean data)'
+    )
+    
+    declare_lidar_output_topic = DeclareLaunchArgument(
+        'lidar_output_topic',
+        default_value='/wamv/sensors/lidars/lidar_wamv_sensor/points_faulty',
+        description='LiDAR output topic (faulty data)'
+    )
+    
+    declare_lidar_fault_type = DeclareLaunchArgument(
+        'lidar_fault_type',
+        default_value='0',
+        description='LiDAR fault type: 0=None, 1=IncreasedNoise, 2=ReducedRange, 3=Stuck'
+    )
+    
+    declare_lidar_fault_enabled = DeclareLaunchArgument(
+        'lidar_fault_enabled',
+        default_value='false',
+        description='Enable LiDAR fault injection'
+    )
+    
     # =========================================================================
     # Nodes
     # =========================================================================
@@ -156,6 +192,24 @@ def generate_launch_description():
         ],
     )
     
+    # LiDAR Fault Injection Node
+    lidar_fault_injection_node = Node(
+        condition=IfCondition(LaunchConfiguration('enable_lidar')),
+        package='sensor_fault_injection',
+        executable='lidar_fault_injection_node.py',
+        name='lidar_fault_injection_node',
+        output='screen',
+        parameters=[
+            LaunchConfiguration('config_file'),
+            {
+                'input_topic': LaunchConfiguration('lidar_input_topic'),
+                'output_topic': LaunchConfiguration('lidar_output_topic'),
+                'fault_type': LaunchConfiguration('lidar_fault_type'),
+                'fault_enabled': LaunchConfiguration('lidar_fault_enabled'),
+            }
+        ],
+    )
+    
     return LaunchDescription([
         # Config
         declare_config_file,
@@ -163,6 +217,7 @@ def generate_launch_description():
         # Enable/disable
         declare_enable_gps,
         declare_enable_imu,
+        declare_enable_lidar,
         
         # GPS arguments
         declare_gps_input_topic,
@@ -176,7 +231,14 @@ def generate_launch_description():
         declare_imu_fault_type,
         declare_imu_fault_enabled,
         
+        # LiDAR arguments
+        declare_lidar_input_topic,
+        declare_lidar_output_topic,
+        declare_lidar_fault_type,
+        declare_lidar_fault_enabled,
+        
         # Nodes
         gps_fault_injection_node,
         imu_fault_injection_node,
+        lidar_fault_injection_node,
     ])

@@ -1,0 +1,17 @@
+# Parameters for the recovery-manifold deployment trials.
+# Overridden per trial by launch arguments in mpc_manifold.launch.py.
+wamv_mpc_node:
+  ros__parameters:
+    read_wrench: 0
+    compensate_d: false
+    ref_traj: "/home/yang/usv_ws/src/vrx/vrx_control/traj/approach_leg_0p8.txt"
+    # fault fires when the vessel first reaches the canonical start x (position
+    # trigger); the iteration count is ignored while use_position_trigger is true
+    use_position_trigger: true
+    fault_trigger_x: -459.5
+    fault_trigger_iters: 3200        # used only if use_position_trigger is false
+    thruster_degrade_percentage: 0.95
+    fault_type_sim: 1              # 0 none, 1 left (port), 2 right (starboard)
+    ref_source: "manifold"         # "manifold" | "internal" (ICRA planner arm)
+    manifold_timeout_s: 60.0
+    arrival_strict: true           # paper criterion: inside a zone polygon only

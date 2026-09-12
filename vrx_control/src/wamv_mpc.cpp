@@ -10,11 +10,41 @@ WAMV_MPC::WAMV_MPC()
     this->declare_parameter<int>("read_wrench", 0);
     this->declare_parameter<bool>("compensate_d", false);
     this->declare_parameter<std::string>("ref_traj", "");
+    // [manifold] trial-campaign parameters (defaults reproduce the ICRA build)
+    this->declare_parameter<int>("fault_trigger_iters", 300);          // solve() iterations at 20 Hz
+    this->declare_parameter<double>("thruster_degrade_percentage", 0.5);
+    this->declare_parameter<int>("fault_type_sim", LEFT_THRUSTER_FAULT_SIM); // 0 none, 1 left, 2 right
+    this->declare_parameter<std::string>("ref_source", "internal");     // "internal" | "manifold"
+    this->declare_parameter<bool>("use_position_trigger", false);
+    this->declare_parameter<double>("fault_trigger_x", -459.5);          // world x of the canonical start
+    this->declare_parameter<double>("manifold_timeout_s", 20.0);
+    this->declare_parameter<bool>("arrival_strict", false);
 
     // Get parameters
     this->get_parameter("read_wrench", READ_WRENCH);
     this->get_parameter("compensate_d", COMPENSATE_D);
     this->get_parameter("ref_traj", REF_TRAJ);
+    {
+        int ft = 300, fty = LEFT_THRUSTER_FAULT_SIM;
+        double deg = 0.5;
+        this->get_parameter("fault_trigger_iters", ft);
+        this->get_parameter("thruster_degrade_percentage", deg);
+        this->get_parameter("fault_type_sim", fty);
+        this->get_parameter("ref_source", REF_SOURCE);
+        this->get_parameter("use_position_trigger", use_position_trigger);
+        this->get_parameter("fault_trigger_x", fault_trigger_x);
+        this->get_parameter("manifold_timeout_s", manifold_timeout_s);
+        this->get_parameter("arrival_strict", arrival_strict);
+        fault_trigger = use_position_trigger ? (SIZE_MAX / 2) : static_cast<size_t>(std::max(ft, 1));
+        thruster_degrade_percentage = static_cast<float>(std::min(std::max(deg, 0.0), 1.0));
+        FAULT_TYPE_TO_SIMULATE = fty;
+        RCLCPP_INFO(this->get_logger(),
+                    "[manifold] trigger=%s (iters=%d, x=%.1f) degrade=%.2f fault_type=%d ref_source=%s "
+                    "timeout=%.1fs arrival_strict=%d",
+                    use_position_trigger ? "position" : "iterations", ft, fault_trigger_x,
+                    thruster_degrade_percentage, FAULT_TYPE_TO_SIMULATE,
+                    REF_SOURCE.c_str(), manifold_timeout_s, (int)arrival_strict);
+    }
     
     // Pre-load the trajectory
     // REF_TRAJ = "/home/yang/usv_ws/src/vrx/vrx_control/traj/stationary.txt";
@@ -43,6 +73,12 @@ WAMV_MPC::WAMV_MPC()
         "/wamv/sensors/position/ground_truth_odometry",
         20,
         std::bind(&WAMV_MPC::states_cb, this, std::placeholders::_1));
+    // [manifold] external recovery reference and status
+    manifold_ref_sub = this->create_subscription<std_msgs::msg::Float64MultiArray>(
+        "/wamv/manifold_ref", 10,
+        std::bind(&WAMV_MPC::manifold_ref_cb, this, std::placeholders::_1));
+    manifold_status_pub = this->create_publisher<std_msgs::msg::Float64MultiArray>(
+        "/wamv/manifold_status", 10);
     left_thrust_cmd_pub = this->create_publisher<std_msgs::msg::Float64>(
         "/wamv/thrusters/left/thrust", 20);
     right_thrust_cmd_pub = this->create_publisher<std_msgs::msg::Float64>(
@@ -369,6 +405,17 @@ void WAMV_MPC::ref_cb(int line_to_read)
 
 void WAMV_MPC::solve()
 {
+    // [manifold] position-based fault trigger: arm one solve ahead so the
+    // existing "iteration_count == fault_trigger" mission-start bookkeeping in
+    // publish_cin (which runs after iteration_count++) still fires.
+    if (use_position_trigger && !position_trigger_fired && local_pos.x <= fault_trigger_x) {
+        fault_trigger = iteration_count + 1;
+        position_trigger_fired = true;
+        RCLCPP_WARN(this->get_logger(),
+                    "[manifold] position trigger: x=%.1f <= %.1f at iteration %zu; fault armed",
+                    local_pos.x, fault_trigger_x, iteration_count);
+    }
+
     // identify turning direction
     if (pre_yaw >= 0 && local_pos.psi >=0)
     {
@@ -489,10 +536,10 @@ void WAMV_MPC::solve()
     // ocp_nlp_get(mpc_capsule->nlp_config, mpc_capsule->nlp_solver, "time_tot", &acados_out.cpu_time);
     // ocp_nlp_get(mpc_capsule->nlp_solver, "time_tot", &acados_out.cpu_time);
 
-    // ocp_nlp_out_get(mpc_capsule->nlp_config, mpc_capsule->nlp_dims, mpc_capsule->nlp_out, 0, "u", (void *)acados_out.u0);
-
-    acados_out.u0[0] = 100;
-    acados_out.u0[1] = 100;
+    // [manifold] restored: ros2_underactuate HEAD had this line commented out and
+    // u0 hard-coded to 100 N (a debugging state; WAMV_NZ = 0 so nothing else
+    // reads the solution). If your local ICRA copy differs here, keep yours.
+    ocp_nlp_out_get(mpc_capsule->nlp_config, mpc_capsule->nlp_dims, mpc_capsule->nlp_out, 0, "u", (void *)acados_out.u0);
     
     publish_cin(acados_out.u0[0], acados_out.u0[1]);
     
@@ -577,6 +624,10 @@ void WAMV_MPC::publish_cin(double Tp_mpc, double Ts_mpc)
         case ADAPTIVE_ASSISTED_RETURN:
             mode_name = "ADAPTIVE_RETURN";
             mode_color = "\033[35m"; // Magenta
+            break;
+        case MANIFOLD_RETURN:   // [manifold]
+            mode_name = "MANIFOLD_RETURN";
+            mode_color = "\033[34m"; // Blue
             break;
         default:
             mode_name = "UNKNOWN";
@@ -669,6 +720,9 @@ void WAMV_MPC::publish_cin(double Tp_mpc, double Ts_mpc)
             break;
         case ADAPTIVE_ASSISTED_RETURN:
             mode_msg.data = "ADAPTIVE_ASSISTED_RETURN";
+            break;
+        case MANIFOLD_RETURN:   // [manifold]
+            mode_msg.data = "MANIFOLD_RETURN";
             break;
         default:
             mode_msg.data = "UNKNOWN";
@@ -797,6 +851,10 @@ void WAMV_MPC::publish_cin(double Tp_mpc, double Ts_mpc)
                    mission_energy_consumed / mission_duration);
     }
     
+    // [manifold] status every solve after the fault, for every ref_source
+    // (the runner stops a trial on data[7] = mission_completed)
+    if (iteration_count >= fault_trigger) publishManifoldStatus();
+
     // Publish mission metrics
     if (iteration_count >= fault_trigger) {
         std_msgs::msg::Float64MultiArray metrics_msg;
@@ -1789,7 +1847,8 @@ void WAMV_MPC::generateStationKeepingTrajectory() {
     // Get current position as station keeping target
     double target_x = local_pos.x;
     double target_y = local_pos.y;
-    double target_psi = local_pos.psi;
+    // double target_psi = local_pos.psi;
+    double target_psi = convertToContinuousPsi(local_pos.psi, yaw_sum);   // was: local_pos.psi
     
     // Generate stationary trajectory (same format as your .txt file)
     // Format: [x, y, psi, u, v, r, Tp, Ts] - 8 columns
@@ -1998,6 +2057,42 @@ void WAMV_MPC::updateOperationalMode() {
             return;
         }
         
+        // [manifold] external-reference mode ---------------------------------
+        if (REF_SOURCE == "manifold" && !manifold_fallback) {
+            double since_trigger = (mission_start_time >= 0.0)
+                ? (rclcpp::Clock(RCL_SYSTEM_TIME).now().seconds() - start_time - mission_start_time)
+                : 0.0;
+            if (manifold_ref_received) {
+                if (current_mode != MANIFOLD_RETURN) {
+                    RCLCPP_INFO(this->get_logger(),
+                                "[manifold] tracking external reference (%zu rows, latency %.2fs)",
+                                manifold_trajectory.size(), manifold_ref_latency_s);
+                }
+                current_mode = MANIFOLD_RETURN;
+                if (current_mode == MANIFOLD_RETURN && hasArrivedAtHarborZone()) {
+                    mission_completed = true;
+                    current_mode = STATION_KEEPING;
+                    arrival_time = rclcpp::Clock(RCL_SYSTEM_TIME).now().seconds() - start_time;
+                    RCLCPP_INFO(this->get_logger(), "[manifold] SUCCESS: arrived, t=%.1fs", arrival_time);
+                    generateStationKeepingTrajectory();
+                }
+                return;
+            }
+            if (since_trigger < manifold_timeout_s) {
+                // hold the preset course while the sidecar computes; the preset
+                // westbound leg must be long enough to cover the timeout
+                current_mode = FOLLOW_PRESET_TRAJECTORY;
+                trajectory_generation_active = false;
+                return;
+            }
+            manifold_fallback = true;
+            RCLCPP_WARN(this->get_logger(),
+                        "[manifold] no reference within %.1fs: falling back to internal planner",
+                        manifold_timeout_s);
+            // fall through to the internal planner below
+        }
+        // ----------------------------------------------------------------------
+
         // Continue with adaptive return mode
         current_mode = ADAPTIVE_ASSISTED_RETURN;
         
@@ -2040,6 +2135,7 @@ void WAMV_MPC::ref_cb_enhanced(int line_to_read) {
             
         case STATION_KEEPING:
         case ADAPTIVE_ASSISTED_RETURN:
+        case MANIFOLD_RETURN:   // [manifold] same consumer; generated_trajectory holds the external reference
             if (trajectory_generation_active && !generated_trajectory.empty()) {
                 
                 // SAFETY CHECK: Ensure we have valid trajectory data
@@ -2151,6 +2247,8 @@ bool WAMV_MPC::hasArrivedAtHarborZone() {
     }
     
     // Fallback: Check if close to ANY zone center
+    // [manifold] disabled when arrival_strict (paper criterion: inside a zone polygon)
+    if (arrival_strict) return false;
     for (size_t zone_idx = 0; zone_idx < harbor_zones.size(); zone_idx++) {
         double distance_to_zone = (harbor_zones[zone_idx].center - current_pos).norm();
         if (distance_to_zone <= ARRIVAL_DISTANCE_THRESHOLD) {
@@ -2629,4 +2727,83 @@ double WAMV_MPC::calculatePowerFromThrust(double thrust) {
     const double FIXED_LOSSES = 10.0;  // Watts
     
     return actual_power + FIXED_LOSSES;
+}
+
+// ============================================================================
+// [manifold] external recovery reference
+// ============================================================================
+void WAMV_MPC::manifold_ref_cb(const std_msgs::msg::Float64MultiArray::SharedPtr msg)
+{
+    if (REF_SOURCE != "manifold") return;
+    if (manifold_fallback) {
+        RCLCPP_WARN(this->get_logger(),
+                    "[manifold] reference arrived after the %.1fs timeout: ignored, trial stays on the internal planner",
+                    manifold_timeout_s);
+        return;
+    }
+    const auto& d = msg->data;
+    if (d.size() < 2 + 8 || ((d.size() - 2) % 8) != 0) {
+        RCLCPP_ERROR(this->get_logger(),
+                     "[manifold] bad reference message: %zu values (expect 2 + 8k)", d.size());
+        return;
+    }
+    const double t0 = d[0];
+    const double dt = (d[1] > 1e-4) ? d[1] : 0.05;
+    const size_t rows = (d.size() - 2) / 8;
+
+    // rows already elapsed at receipt are skipped, not replayed
+    const double now = rclcpp::Clock(RCL_SYSTEM_TIME).now().seconds();
+    size_t skip = 0;
+    if (now > t0) skip = static_cast<size_t>(std::floor((now - t0) / dt));
+    if (skip >= rows) {
+        RCLCPP_ERROR(this->get_logger(),
+                     "[manifold] reference is entirely in the past (%zu rows, skip %zu)", rows, skip);
+        return;
+    }
+
+    // convert bounded psi to the node's continuous yaw, row by row
+    std::vector<std::vector<double>> traj;
+    traj.reserve(rows - skip);
+    double psi_prev = yaw_sum;
+    for (size_t k = skip; k < rows; ++k) {
+        std::vector<double> row(8);
+        for (int j = 0; j < 8; ++j) row[j] = d[2 + 8 * k + j];
+        row[2] = convertToContinuousPsi(row[2], psi_prev);
+        psi_prev = row[2];
+        traj.push_back(row);
+    }
+
+    manifold_trajectory = traj;
+    manifold_ref_t0 = t0 + skip * dt;
+    manifold_ref_dt = dt;
+    if (!manifold_ref_received && mission_start_time >= 0.0) {
+        manifold_ref_latency_s = now - start_time - mission_start_time;
+    }
+    manifold_ref_received = true;
+
+    // hand over to the shared consumer (ref_cb_enhanced)
+    generated_trajectory = manifold_trajectory;
+    generated_line_number = 0;
+    trajectory_generation_active = true;
+    RCLCPP_INFO(this->get_logger(),
+                "[manifold] reference received: %zu rows (%zu skipped), dt=%.3f, latency %.2fs",
+                traj.size(), skip, dt, manifold_ref_latency_s);
+}
+
+void WAMV_MPC::publishManifoldStatus()
+{
+    // [mode, ref_received, latency_s, fallback, rows, line_index, since_trigger_s, mission_completed]
+    std_msgs::msg::Float64MultiArray m;
+    double since_trigger = (mission_start_time >= 0.0)
+        ? (rclcpp::Clock(RCL_SYSTEM_TIME).now().seconds() - start_time - mission_start_time)
+        : -1.0;
+    m.data = {static_cast<double>(current_mode),
+              manifold_ref_received ? 1.0 : 0.0,
+              manifold_ref_latency_s,
+              manifold_fallback ? 1.0 : 0.0,
+              static_cast<double>(manifold_trajectory.size()),
+              static_cast<double>(generated_line_number),
+              since_trigger,
+              mission_completed ? 1.0 : 0.0};
+    manifold_status_pub->publish(m);
 }

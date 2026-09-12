@@ -21,6 +21,8 @@
 #include <random>
 #include <deque>    
 #include <numeric>
+#include <algorithm>   // [manifold] std::max/std::min
+#include <cstdint>     // [manifold] SIZE_MAX
 
 #include <Eigen/Dense>
 #include <fstream>
@@ -264,7 +266,9 @@ class WAMV_MPC : public rclcpp::Node
     float yaw_error;        // yaw degree error
 
     size_t iteration_count = 0;  // Add counter
-    const size_t fault_trigger = 300;  // 10s at 20 Hz
+    // [manifold] fault_trigger is now a ROS parameter ("fault_trigger_iters",
+    // in solve() iterations at 20 Hz; 300 = 15 s, the ICRA setting).
+    size_t fault_trigger = 300;
 
     // Buffers for low-pass filtering
     const double alpha = 0.2; // Smoothing factor (0 < alpha < 1, lower = smoother)
@@ -329,6 +333,9 @@ class WAMV_MPC : public rclcpp::Node
     double prev_wy_trend = 0.1;
     double prev_wpsi_trend = 0.1;
 
+    // [manifold] severity and fault type are ROS parameters
+    // ("thruster_degrade_percentage", "fault_type_sim") so trial campaigns do
+    // not need a recompile per cell.
     float thruster_degrade_percentage = 0.5;
     enum FaultSimulationType {
         NO_FAULT_SIM = 0,
@@ -338,8 +345,7 @@ class WAMV_MPC : public rclcpp::Node
 
     bool ENABLE_ENV_ASSIST = true;
     
-    // Define the fault type to simulate - change this to simulate different faults
-    static const int FAULT_TYPE_TO_SIMULATE = LEFT_THRUSTER_FAULT_SIM;
+    int FAULT_TYPE_TO_SIMULATE = LEFT_THRUSTER_FAULT_SIM;
     
     // Constants for filtering
     const int FAULT_CONFIRMATION_COUNT = 2;  // Need this many consecutive detections
@@ -366,8 +372,45 @@ class WAMV_MPC : public rclcpp::Node
     enum OperationalMode {
         FOLLOW_PRESET_TRAJECTORY = 0,    // Follow pre-read .txt file
         STATION_KEEPING = 1,             // Stationary after fault
-        ADAPTIVE_ASSISTED_RETURN = 2     // Fast planned return to port
+        ADAPTIVE_ASSISTED_RETURN = 2,    // Fast planned return to port
+        MANIFOLD_RETURN = 3              // [manifold] track an externally supplied recovery reference
     };
+
+    // ---- [manifold] external recovery reference -----------------------------
+    // ref_source: "internal" (default, ICRA behaviour) or "manifold".
+    // In "manifold" mode, after the fault trigger the node holds the preset
+    // course until a reference arrives on /wamv/manifold_ref, then tracks it.
+    // If none arrives within manifold_timeout_s it falls back to the internal
+    // planner and records the fallback in /wamv/manifold_status.
+    //
+    // /wamv/manifold_ref (std_msgs/Float64MultiArray) layout:
+    //   data[0] = t0, the ROS time (seconds) at which row 0 applies
+    //   data[1] = dt, row spacing in seconds (0.05 expected)
+    //   data[2:] = rows of 8: [x, y, psi_bounded, u, v, r, Tp, Ts]
+    // psi is converted to the node's continuous yaw on receipt. Rows already
+    // elapsed at receipt (sidecar latency) are skipped, not replayed.
+    std::string REF_SOURCE = "internal";
+    double manifold_timeout_s = 20.0;
+    // Position-based fault trigger (trial campaign): when enabled, the fault
+    // fires at the first solve() with local_pos.x <= fault_trigger_x, so the
+    // recovery always starts at the canonical start regardless of node start
+    // time or ramp-up. Implemented by re-arming fault_trigger = iteration+1 so
+    // every existing "iteration_count >= fault_trigger" check is untouched.
+    bool use_position_trigger = false;
+    double fault_trigger_x = -459.5;
+    bool position_trigger_fired = false;
+    bool arrival_strict = false;          // true: inside a zone polygon only (no 15 m fallback)
+    bool manifold_ref_received = false;
+    bool manifold_fallback = false;
+    double manifold_ref_latency_s = -1.0; // trigger -> first reference, seconds
+    double manifold_ref_t0 = 0.0;
+    double manifold_ref_dt = 0.05;
+    std::vector<std::vector<double>> manifold_trajectory;
+    rclcpp::Subscription<std_msgs::msg::Float64MultiArray>::SharedPtr manifold_ref_sub;
+    rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr manifold_status_pub;
+    void manifold_ref_cb(const std_msgs::msg::Float64MultiArray::SharedPtr msg);
+    void publishManifoldStatus();
+    // -------------------------------------------------------------------------
 
     std::vector<HarborZone> harbor_zones;
     std::vector<std::vector<Vector2d>> dock_areas;

@@ -19,6 +19,7 @@ ament_python_install_package(${PROJECT_NAME})
 install(PROGRAMS
   sensor_fault_injection/gps_fault_injection_node.py
   sensor_fault_injection/imu_fault_injection_node.py
+  sensor_fault_injection/lidar_fault_injection_node.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

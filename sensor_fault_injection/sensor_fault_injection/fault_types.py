@@ -2,7 +2,7 @@
 """
 Fault Type Definitions for Sensor Fault Injection
 
-This module defines the fault types for GPS and IMU sensors.
+This module defines the fault types for GPS, IMU, and LiDAR sensors.
 """
 
 from enum import IntEnum
@@ -26,6 +26,14 @@ class IMUFaultType(IntEnum):
     DEGRADED_RATE = 3   # Reduced update frequency
 
 
+class LiDARFaultType(IntEnum):
+    """Enumeration of LiDAR fault types"""
+    NONE = 0
+    INCREASED_NOISE = 1  # Noise amplitude increased (rain, fog, spray)
+    REDUCED_RANGE = 2    # Max detection distance decreased
+    STUCK = 3            # Frozen point cloud readings
+
+
 # Fault type descriptions for logging and documentation
 GPS_FAULT_DESCRIPTIONS = {
     GPSFaultType.NONE: "No fault (pass-through)",
@@ -41,4 +49,11 @@ IMU_FAULT_DESCRIPTIONS = {
     IMUFaultType.STUCK: "Frozen sensor readings",
     IMUFaultType.SATURATION: "Output clipped at max/min values",
     IMUFaultType.DEGRADED_RATE: "Reduced update frequency",
+}
+
+LIDAR_FAULT_DESCRIPTIONS = {
+    LiDARFaultType.NONE: "No fault (pass-through)",
+    LiDARFaultType.INCREASED_NOISE: "Noise amplitude increased (rain, fog, spray, dust)",
+    LiDARFaultType.REDUCED_RANGE: "Max detection distance decreased (fog, rain, dirty lens)",
+    LiDARFaultType.STUCK: "Frozen point cloud readings (hardware failure, firmware crash)",
 }
