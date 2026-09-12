@@ -4,5 +4,6 @@ syntax: glob
 *.swp
 *.orig
 *.*~
-*.pyc*.db3
+*.pyc
+*.db3
 *.mcap
